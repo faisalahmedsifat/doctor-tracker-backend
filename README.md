@@ -3,11 +3,13 @@
 A modular REST API built with Fastify 5, TypeScript, Zod, and MongoDB/Mongoose.
 
 ## Requirements
+
 - Node.js 22+
 - pnpm 12+
 - MongoDB 7+ or MongoDB Atlas
 
 ## Getting started
+
 ```bash
 pnpm install
 cp .env.example .env
@@ -55,18 +57,22 @@ Doctor email and medical-license number are unique. The API validates and normal
 **Production index rollout:** create the Doctor model indexes before enabling doctor writes in production. Mongoose automatic index creation is disabled in production by design; run an explicit index migration/deployment step rather than relying on application startup to create indexes.
 
 ## Scripts
+
 - `pnpm dev` — development server with reload
 - `pnpm typecheck` — TypeScript validation
 - `pnpm lint` — ESLint
-- `pnpm test` — run tests
+- `pnpm test` — run isolated unit and HTTP-boundary tests (no database required)
+- `pnpm test:integration` — run MongoDB-backed API integration tests (requires the configured MongoDB instance)
 - `pnpm build` — production build
 - `pnpm start` — run production build
 - `pnpm seed:admin` — one-time administrator bootstrap
 
 ## Architecture
+
 Feature modules own routes, schemas, services, repositories, and models. Routes handle HTTP concerns; services contain business rules; persistence models are isolated by feature. Shared concerns live under `common/`. The API is versioned under `/api/v1`.
 
 ## Security
+
 - No public administrator registration.
 - Password hashes only (bcryptjs, 12 rounds).
 - Short-lived JWT access tokens in signed HttpOnly cookies.
