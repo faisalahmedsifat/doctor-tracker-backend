@@ -17,6 +17,6 @@ describe('appointment schemas', () => {
   it('requires a non-empty patch and validates date range filters', () => {
     expect(appointmentUpdateSchema.safeParse({}).success).toBe(false);
     expect(appointmentUpdateSchema.safeParse({ status: 'confirmed' }).success).toBe(true);
-    expect(appointmentListQuerySchema.safeParse({ dateFrom: '2030-02-02', dateTo: '2030-01-01' }).success).toBe(false);
+    expect(appointmentListQuerySchema.safeParse({ dateFrom: '2030-02-02T00:00:00.000Z', dateTo: '2030-01-01T00:00:00.000Z' }).success).toBe(false);
   });
 });

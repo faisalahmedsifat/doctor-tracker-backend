@@ -34,8 +34,8 @@ export const appointmentListQuerySchema = z.object({
   status: status.optional(),
   doctorId: objectId.optional(),
   patientId: objectId.optional(),
-  dateFrom: z.string().date().optional(),
-  dateTo: z.string().date().optional(),
+  dateFrom: z.string().datetime({ offset: true }).optional(),
+  dateTo: z.string().datetime({ offset: true }).optional(),
   sortOrder: z.enum(['asc', 'desc']).default('asc'),
 }).refine((value) => !value.dateFrom || !value.dateTo || value.dateFrom <= value.dateTo, {
   message: 'dateFrom must be on or before dateTo.',

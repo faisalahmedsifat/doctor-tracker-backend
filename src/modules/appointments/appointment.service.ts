@@ -64,8 +64,8 @@ export async function listAppointments(query: AppointmentListQuery) {
   if (query.patientId) filter.patient = query.patientId;
   if (query.dateFrom || query.dateTo) {
     filter.startAt = {
-      ...(query.dateFrom ? { $gte: new Date(`${query.dateFrom}T00:00:00.000Z`) } : {}),
-      ...(query.dateTo ? { $lt: new Date(new Date(`${query.dateTo}T00:00:00.000Z`).getTime() + 86_400_000) } : {}),
+      ...(query.dateFrom ? { $gte: new Date(query.dateFrom) } : {}),
+      ...(query.dateTo ? { $lt: new Date(query.dateTo) } : {}),
     };
   }
   const records = await populated(Appointment.find(filter)).sort({ startAt: query.sortOrder, _id: 1 }).lean();

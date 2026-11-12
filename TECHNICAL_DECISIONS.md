@@ -136,7 +136,7 @@ This document records the reasoning behind the system's initial architecture. Up
 
 **Rationale:** Scheduling is an independent lifecycle, and an appointment occupies a half-open interval from start to start + duration. Checking interval overlap (rather than only matching start times) correctly rejects partial overlaps while allowing adjacent visits. Cancelled and no-show records do not reserve capacity.
 
-**Trade-off:** The current conflict check is a read-before-write application check. It is correct for sequential requests but is not serializable under simultaneous booking attempts on different API instances. Production scheduling with concurrent writers needs a transactional slot-lock or discrete slot-allocation design. Date-only filters use UTC day boundaries; the browser converts its local date/time input to an ISO instant before sending it.
+**Trade-off:** The current conflict check is a read-before-write application check. It is correct for sequential requests but is not serializable under simultaneous booking attempts on different API instances. Production scheduling with concurrent writers needs a transactional slot-lock or discrete slot-allocation design. Date filters are converted by the browser from the selected local calendar days into ISO instants (inclusive start, exclusive next-day end), so clinics see their own local day boundaries without relying on the API server timezone.
 
 ## 17. Validate and bound list queries at the API boundary
 
