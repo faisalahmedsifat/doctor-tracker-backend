@@ -52,9 +52,21 @@ All doctor endpoints require an authenticated administrator:
 - `PATCH /api/v1/doctors/:id` — update supplied fields.
 - `DELETE /api/v1/doctors/:id` — permanently delete a doctor.
 
-Doctor email and medical-license number are unique. The API validates and normalizes email/license values, bounds numeric inputs, allow-lists sorting, escapes search terms, and translates duplicate-key races into HTTP 409 responses. Doctor documents use timestamps and indexes for unique identifiers and common directory queries.
+Doctor email and medical-license number are unique. The API validates and normalizes email/license values, bounds numeric inputs, allow-lists sorting, escapes search terms, and translates duplicate-key races into HTTP 409 responses. Doctor documents use timestamps and indexes for unique identifiers and common directory queries. A doctor with assigned patients cannot be deleted until those patients are reassigned, preserving referential integrity.
 
 **Production index rollout:** create the Doctor model indexes before enabling doctor writes in production. Mongoose automatic index creation is disabled in production by design; run an explicit index migration/deployment step rather than relying on application startup to create indexes.
+
+## Patient management API
+
+All patient endpoints require an authenticated administrator:
+
+- `GET /api/v1/patients` — paginated directory with search, status, assigned-doctor and sorting filters.
+- `GET /api/v1/patients/:id` — retrieve one patient, including the assigned doctor summary.
+- `POST /api/v1/patients` — create a patient and generate an immutable `PT-` patient number.
+- `PATCH /api/v1/patients/:id` — update supplied fields.
+- `DELETE /api/v1/patients/:id` — permanently delete a patient.
+
+Patient records validate birth dates and contact details, normalize email, and verify doctor assignments before writes. Patient search and pagination are performed by MongoDB. Patient data is sensitive: use HTTPS, restrict database access, enable encrypted storage/backups, define retention and deletion policies, and avoid logging patient payloads before production use. This milestone does not implement field-level encryption, audit history, or consent management.
 
 ## Scripts
 

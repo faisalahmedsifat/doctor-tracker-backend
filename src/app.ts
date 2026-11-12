@@ -8,6 +8,7 @@ import { registerOpenApi } from './plugins/openapi.js';
 import { healthRoutes } from './modules/health/health.routes.js';
 import { authRoutes } from './modules/auth/auth.routes.js';
 import { doctorRoutes } from './modules/doctors/doctor.routes.js';
+import { patientRoutes } from './modules/patients/patient.routes.js';
 
 export async function buildApp() {
   const app = Fastify({
@@ -22,10 +23,12 @@ export async function buildApp() {
   await registerAuthentication(app);
   await registerOpenApi(app);
 
-  app.setNotFoundHandler(async (_request, reply) => reply.code(404).send({
-    success: false,
-    error: { code: 'NOT_FOUND', message: 'The requested resource was not found.' },
-  }));
+  app.setNotFoundHandler(async (_request, reply) =>
+    reply.code(404).send({
+      success: false,
+      error: { code: 'NOT_FOUND', message: 'The requested resource was not found.' },
+    }),
+  );
 
   // Install the error handler before registering route plugins so that their
   // encapsulated contexts inherit the same response contract.
@@ -43,9 +46,10 @@ export async function buildApp() {
       return reply.code(429).send(error);
     }
 
-    const statusCode = error.statusCode && error.statusCode >= 400 && error.statusCode < 500
-      ? error.statusCode
-      : 500;
+    const statusCode =
+      error.statusCode && error.statusCode >= 400 && error.statusCode < 500
+        ? error.statusCode
+        : 500;
     return reply.code(statusCode).send({
       success: false,
       error: {
@@ -75,6 +79,7 @@ export async function buildApp() {
   await app.register(healthRoutes, { prefix: '/api/v1/health' });
   await app.register(authRoutes, { prefix: '/api/v1/auth' });
   await app.register(doctorRoutes, { prefix: '/api/v1/doctors' });
+  await app.register(patientRoutes, { prefix: '/api/v1/patients' });
 
   return app;
 }

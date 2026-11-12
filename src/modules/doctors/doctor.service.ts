@@ -1,4 +1,5 @@
 import { AppError } from '../../common/errors.js';
+import { Patient } from '../patients/patient.model.js';
 import { Doctor, type DoctorDocument } from './doctor.model.js';
 import type { DoctorInput, DoctorListQuery, DoctorUpdate } from './doctor.schemas.js';
 
@@ -110,6 +111,13 @@ export async function updateDoctor(id: string, input: DoctorUpdate) {
 }
 
 export async function deleteDoctor(id: string): Promise<void> {
+  if (await Patient.exists({ assignedDoctor: id })) {
+    throw new AppError(
+      409,
+      'DOCTOR_HAS_PATIENTS',
+      'Reassign this doctor’s patients before deleting the doctor.',
+    );
+  }
   const doctor = await Doctor.findByIdAndDelete(id);
   if (!doctor) throw new AppError(404, 'DOCTOR_NOT_FOUND', 'Doctor not found.');
 }
