@@ -56,6 +56,12 @@ Doctor email and medical-license number are unique. The API validates and normal
 
 **Production index rollout:** create the Doctor model indexes before enabling doctor writes in production. Mongoose automatic index creation is disabled in production by design; run an explicit index migration/deployment step rather than relying on application startup to create indexes.
 
+## Dashboard API
+
+- `GET /api/v1/dashboard/overview` — administrator-only live summary with doctor/patient totals, active counts, average active patients per active doctor, current-vs-previous-month registrations, seven months of patient registrations, the five busiest doctor assignments, and the five most recently created patient records.
+
+The overview is computed from MongoDB on request; it contains no seeded/sample metrics. The dashboard response intentionally excludes patient contact details and other unnecessary sensitive fields. The frontend caches the response briefly and invalidates it after doctor or patient mutations.
+
 ## Patient management API
 
 All patient endpoints require an authenticated administrator:

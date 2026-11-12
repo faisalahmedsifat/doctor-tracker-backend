@@ -9,6 +9,7 @@ import { healthRoutes } from './modules/health/health.routes.js';
 import { authRoutes } from './modules/auth/auth.routes.js';
 import { doctorRoutes } from './modules/doctors/doctor.routes.js';
 import { patientRoutes } from './modules/patients/patient.routes.js';
+import { dashboardRoutes } from './modules/dashboard/dashboard.routes.js';
 
 export async function buildApp() {
   const app = Fastify({
@@ -80,6 +81,7 @@ export async function buildApp() {
   await app.register(authRoutes, { prefix: '/api/v1/auth' });
   await app.register(doctorRoutes, { prefix: '/api/v1/doctors' });
   await app.register(patientRoutes, { prefix: '/api/v1/patients' });
+  await app.register(dashboardRoutes, { prefix: '/api/v1/dashboard' });
 
   return app;
 }
