@@ -7,7 +7,7 @@ const envSchema = z.object({
   PORT: z.coerce.number().int().positive().default(4000),
   LOG_LEVEL: z.enum(['fatal', 'error', 'warn', 'info', 'debug', 'trace', 'silent']).default('info'),
   MONGODB_URI: z.string().min(1),
-  FRONTEND_ORIGIN: z.string().url(),
+  FRONTEND_ORIGIN: z.string().url().transform((value) => new URL(value).origin),
   JWT_ACCESS_SECRET: z.string().min(32),
   COOKIE_SECRET: z.string().min(32),
   ACCESS_TOKEN_TTL: z.string().default('15m'),
