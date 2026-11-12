@@ -121,3 +121,19 @@ This document records the reasoning behind the system's initial architecture. Up
 **Rationale:** A client-only route guard can hide UI but still send server-rendered protected markup to an unauthenticated browser. The server layout prevents protected page content from rendering until the backend confirms the session. The API remains the actual authorization boundary and must protect every data endpoint independently.
 
 **Trade-off:** The frontend and API need a cookie-sharing deployment topology. For sibling subdomains, configure a parent cookie domain; for local development, localhost ports share the host cookie jar. This introduces a request to the auth endpoint during protected page rendering.
+
+## 16. Doctor records are independently addressable resources
+
+**Decision:** Store each doctor in a dedicated MongoDB collection with unique email and medical-license indexes.
+
+**Rationale:** Doctors are independently searchable, editable and removable resources. Dedicated documents avoid embedding a growing directory in another record and allow uniqueness to be enforced atomically by MongoDB.
+
+**Trade-off:** Unique indexes must be created before production traffic. Duplicate-key errors are translated into a stable 409 conflict response rather than relying on a preflight existence check, which would be vulnerable to concurrent writes.
+
+## 17. Validate and bound list queries at the API boundary
+
+**Decision:** Use Zod query schemas with a default page size of 10, a hard maximum of 100, allow-listed sort fields, explicit status/specialty filters, and escaped literal search terms.
+
+**Rationale:** The API owns pagination and filtering so clients cannot fetch unbounded collections or inject arbitrary MongoDB query operators. Escaping regex metacharacters ensures search is literal text rather than user-controlled regex syntax.
+
+**Trade-off:** Page/offset pagination is easy to navigate and supports total counts, but very deep offsets can become slower as the collection grows. Cursor pagination can be introduced if observed access patterns warrant it.

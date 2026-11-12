@@ -40,6 +40,20 @@ Access tokens expire after 15 minutes. Cookies use `HttpOnly`, `SameSite=Lax`, a
 
 For browser requests, configure `FRONTEND_ORIGIN` to the exact frontend origin. Credentialed CORS is restricted to this origin, and state-changing requests carrying a different Origin are rejected. Deploy frontend and API over HTTPS in production. For server-side session verification when frontend and API use sibling subdomains (for example, `app.example.com` and `api.example.com`), set `COOKIE_DOMAIN=.example.com` so the browser sends the HttpOnly cookie to both hosts. Leave it unset for local development.
 
+## Doctor management API
+
+All doctor endpoints require an authenticated administrator:
+
+- `GET /api/v1/doctors` — paginated directory; supports `page`, `limit` (maximum 100), `search`, `specialty`, `status`, `sortBy`, and `sortOrder`.
+- `GET /api/v1/doctors/:id` — retrieve one doctor.
+- `POST /api/v1/doctors` — create a doctor.
+- `PATCH /api/v1/doctors/:id` — update supplied fields.
+- `DELETE /api/v1/doctors/:id` — permanently delete a doctor.
+
+Doctor email and medical-license number are unique. The API validates and normalizes email/license values, bounds numeric inputs, allow-lists sorting, escapes search terms, and translates duplicate-key races into HTTP 409 responses. Doctor documents use timestamps and indexes for unique identifiers and common directory queries.
+
+**Production index rollout:** create the Doctor model indexes before enabling doctor writes in production. Mongoose automatic index creation is disabled in production by design; run an explicit index migration/deployment step rather than relying on application startup to create indexes.
+
 ## Scripts
 - `pnpm dev` — development server with reload
 - `pnpm typecheck` — TypeScript validation

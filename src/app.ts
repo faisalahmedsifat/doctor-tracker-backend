@@ -7,6 +7,7 @@ import { registerAuthentication } from './plugins/authentication.js';
 import { registerOpenApi } from './plugins/openapi.js';
 import { healthRoutes } from './modules/health/health.routes.js';
 import { authRoutes } from './modules/auth/auth.routes.js';
+import { doctorRoutes } from './modules/doctors/doctor.routes.js';
 
 export async function buildApp() {
   const app = Fastify({
@@ -73,6 +74,7 @@ export async function buildApp() {
 
   await app.register(healthRoutes, { prefix: '/api/v1/health' });
   await app.register(authRoutes, { prefix: '/api/v1/auth' });
+  await app.register(doctorRoutes, { prefix: '/api/v1/doctors' });
 
   return app;
 }
