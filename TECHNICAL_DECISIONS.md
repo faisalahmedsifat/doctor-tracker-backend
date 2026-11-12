@@ -130,6 +130,14 @@ This document records the reasoning behind the system's initial architecture. Up
 
 **Trade-off:** Unique indexes must be created before production traffic. Duplicate-key errors are translated into a stable 409 conflict response rather than relying on a preflight existence check, which would be vulnerable to concurrent writes.
 
+## 18. Model appointments as first-class time intervals
+
+**Decision:** Store appointments in their own collection with patient/doctor references, a UTC start instant, duration, status, and timestamps. Index doctor/start, patient/start, and status/start access patterns.
+
+**Rationale:** Scheduling is an independent lifecycle, and an appointment occupies a half-open interval from start to start + duration. Checking interval overlap (rather than only matching start times) correctly rejects partial overlaps while allowing adjacent visits. Cancelled and no-show records do not reserve capacity.
+
+**Trade-off:** The current conflict check is a read-before-write application check. It is correct for sequential requests but is not serializable under simultaneous booking attempts on different API instances. Production scheduling with concurrent writers needs a transactional slot-lock or discrete slot-allocation design. Date-only filters use UTC day boundaries; the browser converts its local date/time input to an ISO instant before sending it.
+
 ## 17. Validate and bound list queries at the API boundary
 
 **Decision:** Use Zod query schemas with a default page size of 10, a hard maximum of 100, allow-listed sort fields, explicit status/specialty filters, and escaped literal search terms.

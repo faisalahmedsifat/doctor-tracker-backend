@@ -52,9 +52,21 @@ All doctor endpoints require an authenticated administrator:
 - `PATCH /api/v1/doctors/:id` — update supplied fields.
 - `DELETE /api/v1/doctors/:id` — permanently delete a doctor.
 
-Doctor email and medical-license number are unique. The API validates and normalizes email/license values, bounds numeric inputs, allow-lists sorting, escapes search terms, and translates duplicate-key races into HTTP 409 responses. Doctor documents use timestamps and indexes for unique identifiers and common directory queries. A doctor with assigned patients cannot be deleted until those patients are reassigned, preserving referential integrity.
+Doctor email and medical-license number are unique. The API validates and normalizes email/license values, bounds numeric inputs, allow-lists sorting, escapes search terms, and translates duplicate-key races into HTTP 409 responses. Doctor documents use timestamps and indexes for unique identifiers and common directory queries. A doctor with assigned patients or linked appointments cannot be deleted until those references are resolved, preserving referential integrity.
 
 **Production index rollout:** create the Doctor model indexes before enabling doctor writes in production. Mongoose automatic index creation is disabled in production by design; run an explicit index migration/deployment step rather than relying on application startup to create indexes.
+
+## Appointment management API
+
+All appointment endpoints require an authenticated administrator:
+
+- `GET /api/v1/appointments` — bounded pagination with status, doctor, patient, date-range and text filters.
+- `GET /api/v1/appointments/:id` — retrieve one appointment with patient and doctor summaries.
+- `POST /api/v1/appointments` — schedule an appointment.
+- `PATCH /api/v1/appointments/:id` — reschedule, reassign, edit notes/reason, duration or lifecycle status.
+- `DELETE /api/v1/appointments/:id` — permanently delete an appointment.
+
+Appointments store a UTC instant and a duration in minutes. The API requires active patient and doctor records, rejects past scheduling, and checks overlapping intervals for the same doctor (adjacent appointments are allowed). Cancelled and no-show appointments do not block a slot. Supported statuses are `scheduled`, `confirmed`, `completed`, `cancelled`, and `no_show`. The overlap check is an application-level check; if the system is deployed with concurrent scheduling traffic across multiple API instances, use a transactional slot-allocation/locking strategy to make conflict prevention serializable.
 
 ## Dashboard API
 
@@ -70,7 +82,7 @@ All patient endpoints require an authenticated administrator:
 - `GET /api/v1/patients/:id` — retrieve one patient, including the assigned doctor summary.
 - `POST /api/v1/patients` — create a patient and generate an immutable `PT-` patient number.
 - `PATCH /api/v1/patients/:id` — update supplied fields.
-- `DELETE /api/v1/patients/:id` — permanently delete a patient.
+- `DELETE /api/v1/patients/:id` — permanently delete a patient; linked appointments must be deleted first.
 
 Patient records validate birth dates and contact details, normalize email, and verify doctor assignments before writes. Patient search and pagination are performed by MongoDB. Patient data is sensitive: use HTTPS, restrict database access, enable encrypted storage/backups, define retention and deletion policies, and avoid logging patient payloads before production use. This milestone does not implement field-level encryption, audit history, or consent management.
 

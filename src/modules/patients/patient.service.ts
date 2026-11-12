@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { AppError } from '../../common/errors.js';
 import { Doctor } from '../doctors/doctor.model.js';
+import { Appointment } from '../appointments/appointment.model.js';
 import { Patient, type PatientDocument } from './patient.model.js';
 import type { PatientInput, PatientListQuery, PatientUpdate } from './patient.schemas.js';
 
@@ -143,6 +144,9 @@ export async function updatePatient(id: string, input: PatientUpdate) {
 }
 
 export async function deletePatient(id: string): Promise<void> {
+  if (await Appointment.exists({ patient: id })) {
+    throw new AppError(409, 'PATIENT_HAS_APPOINTMENTS', 'Delete this patient’s appointments before deleting the patient.');
+  }
   const patient = await Patient.findByIdAndDelete(id);
   if (!patient) throw new AppError(404, 'PATIENT_NOT_FOUND', 'Patient not found.');
 }

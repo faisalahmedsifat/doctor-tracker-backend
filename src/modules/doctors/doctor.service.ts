@@ -1,5 +1,6 @@
 import { AppError } from '../../common/errors.js';
 import { Patient } from '../patients/patient.model.js';
+import { Appointment } from '../appointments/appointment.model.js';
 import { Doctor, type DoctorDocument } from './doctor.model.js';
 import type { DoctorInput, DoctorListQuery, DoctorUpdate } from './doctor.schemas.js';
 
@@ -111,6 +112,9 @@ export async function updateDoctor(id: string, input: DoctorUpdate) {
 }
 
 export async function deleteDoctor(id: string): Promise<void> {
+  if (await Appointment.exists({ doctor: id })) {
+    throw new AppError(409, 'DOCTOR_HAS_APPOINTMENTS', 'Delete or reassign this doctor’s appointments before deleting the doctor.');
+  }
   if (await Patient.exists({ assignedDoctor: id })) {
     throw new AppError(
       409,
