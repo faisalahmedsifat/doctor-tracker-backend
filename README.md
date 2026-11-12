@@ -38,7 +38,7 @@ The command normalizes the email, hashes the password with bcrypt (12 rounds), a
 
 Access tokens expire after 15 minutes. Cookies use `HttpOnly`, `SameSite=Lax`, and `Secure` in production. Login is limited to 5 attempts per minute per client IP. The built-in rate-limit store is per process; use a shared Redis-backed store before running multiple API replicas. There is no refresh token or public signup flow in this milestone; an expired session requires signing in again.
 
-For browser requests, configure `FRONTEND_ORIGIN` to the exact frontend origin. Credentialed CORS is restricted to this origin, and state-changing requests carrying a different Origin are rejected. Deploy frontend and API over HTTPS in production.
+For browser requests, configure `FRONTEND_ORIGIN` to the exact frontend origin. Credentialed CORS is restricted to this origin, and state-changing requests carrying a different Origin are rejected. Deploy frontend and API over HTTPS in production. For server-side session verification when frontend and API use sibling subdomains (for example, `app.example.com` and `api.example.com`), set `COOKIE_DOMAIN=.example.com` so the browser sends the HttpOnly cookie to both hosts. Leave it unset for local development.
 
 ## Scripts
 - `pnpm dev` — development server with reload

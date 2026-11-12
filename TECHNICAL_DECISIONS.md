@@ -113,3 +113,11 @@ This document records the reasoning behind the system's initial architecture. Up
 **Rationale:** Authentication endpoints are high-value brute-force targets. A tighter route-specific limit protects credentials while the global limit provides a basic abuse ceiling.
 
 **Trade-off:** The default in-memory store is process-local and resets on restart. Before horizontally scaling the API, move rate-limit state to a shared Redis store so clients cannot multiply their quota across replicas.
+
+## 15. Verify sessions in a Next.js server layout
+
+**Decision:** Put authenticated pages in a route group whose server layout reads the HttpOnly cookie and asks the API to validate it before rendering protected content.
+
+**Rationale:** A client-only route guard can hide UI but still send server-rendered protected markup to an unauthenticated browser. The server layout prevents protected page content from rendering until the backend confirms the session. The API remains the actual authorization boundary and must protect every data endpoint independently.
+
+**Trade-off:** The frontend and API need a cookie-sharing deployment topology. For sibling subdomains, configure a parent cookie domain; for local development, localhost ports share the host cookie jar. This introduces a request to the auth endpoint during protected page rendering.
