@@ -14,6 +14,10 @@ describe('appointment schemas', () => {
     expect(appointmentInputSchema.safeParse({ ...valid, status: 'booked' }).success).toBe(false);
     expect(appointmentInputSchema.safeParse({ ...valid, isAdmin: true }).success).toBe(false);
   });
+  it('accepts a bounded administrator schedule override reason', () => {
+    expect(appointmentInputSchema.safeParse({ ...valid, scheduleOverrideReason: 'Doctor approved an urgent visit.' }).success).toBe(true);
+    expect(appointmentInputSchema.safeParse({ ...valid, scheduleOverrideReason: 'no' }).success).toBe(false);
+  });
   it('requires a non-empty patch and validates date range filters', () => {
     expect(appointmentUpdateSchema.safeParse({}).success).toBe(false);
     expect(appointmentUpdateSchema.safeParse({ status: 'confirmed' }).success).toBe(true);

@@ -1,7 +1,7 @@
 import { Router, type Router as ExpressRouter } from 'express';
 import { AppError } from '../../common/errors.js';
 import { authenticate } from '../../plugins/authentication.js';
-import { createDoctor, deleteDoctor, getDoctor, listDoctors, updateDoctor } from './doctor.service.js';
+import { createDoctor, deleteDoctor, getDoctor, listDoctors, updateDoctor, listDoctorPatients, unassignDoctorPatient } from './doctor.service.js';
 import { doctorIdParamsSchema, doctorInputSchema, doctorListQuerySchema, doctorUpdateSchema } from './doctor.schemas.js';
 
 export const doctorRoutes: ExpressRouter = Router();
@@ -9,6 +9,23 @@ doctorRoutes.use(authenticate);
 doctorRoutes.get('/', async (request, response, next) => {
   try { response.json({ success: true, data: await listDoctors(doctorListQuerySchema.parse(request.query)) }); }
   catch (error) { next(error instanceof Error && 'issues' in error ? new AppError(400, 'VALIDATION_ERROR', error.message) : error); }
+});
+
+doctorRoutes.get('/:id/patients', async (request, response, next) => {
+  try {
+    const { id } = doctorIdParamsSchema.parse(request.params);
+    const page = Math.max(1, Number(request.query.page) || 1);
+    const limit = Math.min(100, Math.max(1, Number(request.query.limit) || 10));
+    response.json({ success: true, data: await listDoctorPatients(id, page, limit) });
+  } catch (error) { next(error instanceof Error && 'issues' in error ? new AppError(400, 'VALIDATION_ERROR', error.message) : error); }
+});
+doctorRoutes.delete('/:id/patients/:patientId', async (request, response, next) => {
+  try {
+    const { id } = doctorIdParamsSchema.parse(request.params);
+    const { id: patientId } = doctorIdParamsSchema.parse({ id: request.params.patientId });
+    await unassignDoctorPatient(id, patientId);
+    response.json({ success: true, message: 'Patient unassigned; the patient record was preserved.' });
+  } catch (error) { next(error instanceof Error && 'issues' in error ? new AppError(400, 'VALIDATION_ERROR', error.message) : error); }
 });
 doctorRoutes.get('/:id', async (request, response, next) => {
   try { const { id } = doctorIdParamsSchema.parse(request.params); response.json({ success: true, data: { doctor: await getDoctor(id) } }); }

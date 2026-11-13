@@ -6,6 +6,9 @@ const doctorSchema = new Schema({
   email: { type: String, required: true, trim: true, lowercase: true, maxlength: 254 },
   phone: { type: String, required: true, trim: true, maxlength: 30 },
   specialty: { type: String, required: true, trim: true, maxlength: 100 },
+  hospital: { type: String, required: true, trim: true, maxlength: 160, default: 'Not specified' },
+  // Empty schedules are deliberately treated as unconfigured, never as assumed clinic hours.
+  workingHours: { type: [{ dayOfWeek: { type: Number, min: 0, max: 6 }, startTime: String, endTime: String }], default: [] },
   licenseNumber: { type: String, required: true, trim: true, uppercase: true, maxlength: 50 },
   yearsOfExperience: { type: Number, required: true, min: 0, max: 70 },
   consultationFee: { type: Number, required: true, min: 0, max: 1000000 },

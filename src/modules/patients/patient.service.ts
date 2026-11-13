@@ -30,6 +30,7 @@ function serializePatient(patient: PatientRecord) {
     email: patient.email ?? null,
     address: patient.address ?? null,
     bloodGroup: patient.bloodGroup ?? null,
+    condition: patient.condition ?? null,
     emergencyContactName: patient.emergencyContactName ?? null,
     emergencyContactPhone: patient.emergencyContactPhone ?? null,
     assignedDoctor: doctor
@@ -83,6 +84,8 @@ function toUpdateRecord(input: PatientUpdate) {
 export async function listPatients(query: PatientListQuery) {
   const filter: Record<string, unknown> = {};
   if (query.status) filter.status = query.status;
+  if (query.dateFrom || query.dateTo) filter.createdAt = { ...(query.dateFrom ? { $gte: new Date(query.dateFrom) } : {}), ...(query.dateTo ? { $lt: new Date(query.dateTo) } : {}) };
+  if (query.condition) filter.condition = { $regex: '^' + escapeRegex(query.condition), $options: 'i' };
   if (query.assignedDoctorId) filter.assignedDoctor = query.assignedDoctorId;
   if (query.search) {
     const term = escapeRegex(query.search);

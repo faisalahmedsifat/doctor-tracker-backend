@@ -5,7 +5,7 @@ import {
 
 const validDoctor = {
   firstName: 'Sarah', lastName: 'Ahmed', email: ' SARAH@EXAMPLE.COM ',
-  phone: '+8801712345678', specialty: 'Cardiology', licenseNumber: ' bm-12345 ',
+  phone: '+8801712345678', specialty: 'Cardiology', hospital: 'Square Hospital', licenseNumber: ' bm-12345 ',
   yearsOfExperience: 8, consultationFee: 1200, status: 'active',
 };
 
@@ -28,6 +28,12 @@ describe('doctor schemas', () => {
   it('requires at least one field for updates', () => {
     expect(doctorUpdateSchema.safeParse({}).success).toBe(false);
     expect(doctorUpdateSchema.safeParse({ status: 'inactive' }).success).toBe(true);
+  });
+  it('validates weekly working hours and rejects duplicate weekdays', () => {
+    const workingHours = [{ dayOfWeek: 1, startTime: '09:00', endTime: '17:00' }];
+    expect(doctorInputSchema.safeParse({ ...validDoctor, workingHours }).success).toBe(true);
+    expect(doctorInputSchema.safeParse({ ...validDoctor, workingHours: [...workingHours, ...workingHours] }).success).toBe(false);
+    expect(doctorInputSchema.safeParse({ ...validDoctor, workingHours: [{ dayOfWeek: 1, startTime: '17:00', endTime: '09:00' }] }).success).toBe(false);
   });
   it('bounds pagination and normalizes query defaults', () => {
     expect(doctorListQuerySchema.parse({}).limit).toBe(10);

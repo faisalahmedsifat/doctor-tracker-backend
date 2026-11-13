@@ -12,7 +12,7 @@ type PopulatedAppointment = {
   patient: { _id: { toString(): string }; firstName: string; lastName: string; patientNumber: string };
   doctor: { _id: { toString(): string }; firstName: string; lastName: string; specialty: string };
   startAt: Date; durationMinutes: number; reason?: string | null; notes?: string | null;
-  status: AppointmentStatus; createdAt: Date; updatedAt: Date;
+  status: AppointmentStatus; scheduleOverrideReason?: string | null; createdAt: Date; updatedAt: Date;
 };
 
 function serialize(record: PopulatedAppointment) {
@@ -25,6 +25,7 @@ function serialize(record: PopulatedAppointment) {
     durationMinutes: record.durationMinutes,
     reason: record.reason ?? null,
     notes: record.notes ?? null,
+    scheduleOverrideReason: record.scheduleOverrideReason ?? null,
     status: record.status,
     createdAt: record.createdAt.toISOString(),
     updatedAt: record.updatedAt.toISOString(),
@@ -37,6 +38,29 @@ async function assertParticipants(patientId: string, doctorId: string, session?:
   const doctor = await Doctor.findById(doctorId).select('_id status').session(session ?? null).lean();
   if (!patient || patient.status !== 'active') throw new AppError(400, 'INVALID_PATIENT', 'Select an existing active patient.');
   if (!doctor || doctor.status !== 'active') throw new AppError(400, 'INVALID_DOCTOR', 'Select an existing active doctor.');
+}
+
+
+function doctorLocalParts(date: Date) {
+  const parts = new Intl.DateTimeFormat('en-US', {
+    timeZone: 'Asia/Dhaka', weekday: 'short', hour: '2-digit', minute: '2-digit', hourCycle: 'h23',
+  }).formatToParts(date);
+  return Object.fromEntries(parts.map((part) => [part.type, part.value]));
+}
+
+async function assertWithinWorkingHours(doctorId: string, start: Date, duration: number, overrideReason?: string | null, session?: ClientSession) {
+  const doctor = await Doctor.findById(doctorId).select('workingHours').session(session ?? null).lean();
+  if (!doctor) throw new AppError(404, 'DOCTOR_NOT_FOUND', 'Doctor not found.');
+  const local = doctorLocalParts(start);
+  const dayOfWeek = ({ Sun: 0, Mon: 1, Tue: 2, Wed: 3, Thu: 4, Fri: 5, Sat: 6 } as Record<string, number>)[local.weekday ?? 'Sun'] ?? 0;
+  const minute = Number(local.hour) * 60 + Number(local.minute);
+  const hours = (doctor.workingHours ?? []).find((entry) => entry.dayOfWeek === dayOfWeek);
+  const within = Boolean(hours && minute >= Number(hours.startTime!.slice(0, 2)) * 60 + Number(hours.startTime!.slice(3)) && minute + duration <= Number(hours.endTime!.slice(0, 2)) * 60 + Number(hours.endTime!.slice(3)));
+  if (!within && !overrideReason?.trim()) {
+    throw new AppError(400, 'SCHEDULE_OVERRIDE_REQUIRED', hours
+      ? 'This time is outside the doctor’s configured working hours. Record an override reason to continue.'
+      : 'This doctor has no configured working hours. Record an override reason to continue.');
+  }
 }
 
 async function assertNoConflict(doctorId: string, start: Date, duration: number, session: ClientSession, excludeId?: string) {
@@ -66,29 +90,56 @@ function populated(query: ReturnType<typeof Appointment.find>) {
 }
 
 export async function listAppointments(query: AppointmentListQuery) {
-  const filter: Record<string, unknown> = {};
-  if (query.status) filter.status = query.status;
-  if (query.doctorId) filter.doctor = query.doctorId;
-  if (query.patientId) filter.patient = query.patientId;
+  const match: Record<string, unknown> = {};
+  if (query.status) match.status = query.status;
+  if (query.doctorId) match.doctor = new mongoose.Types.ObjectId(query.doctorId);
+  if (query.patientId) match.patient = new mongoose.Types.ObjectId(query.patientId);
   if (query.dateFrom || query.dateTo) {
-    filter.startAt = {
+    match.startAt = {
       ...(query.dateFrom ? { $gte: new Date(query.dateFrom) } : {}),
       ...(query.dateTo ? { $lt: new Date(query.dateTo) } : {}),
     };
   }
-  const records = await populated(Appointment.find(filter)).sort({ startAt: query.sortOrder, _id: 1 }).lean();
-  let appointments = records.map((record) => serialize(record as unknown as PopulatedAppointment));
+  const pipeline: mongoose.PipelineStage[] = [
+    { $match: match },
+    { $lookup: { from: 'patients', localField: 'patient', foreignField: '_id', as: 'patient' } },
+    { $unwind: '$patient' },
+    { $lookup: { from: 'doctors', localField: 'doctor', foreignField: '_id', as: 'doctor' } },
+    { $unwind: '$doctor' },
+    { $addFields: {
+      'patient.searchName': { $concat: ['$patient.firstName', ' ', '$patient.lastName'] },
+      'doctor.searchName': { $concat: ['$doctor.firstName', ' ', '$doctor.lastName'] },
+    } },
+  ];
   if (query.search) {
-    const term = query.search.toLocaleLowerCase();
-    appointments = appointments.filter((item) =>
-      [item.patient.fullName, item.patient.patientNumber, item.doctor.fullName, item.doctor.specialty, item.reason ?? '']
-        .some((value) => value.toLocaleLowerCase().includes(term)),
-    );
+    const escaped = query.search.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const search = new RegExp(escaped, 'i');
+    pipeline.push({ $match: { $or: [
+      { 'patient.searchName': search }, { 'patient.firstName': search }, { 'patient.lastName': search },
+      { 'patient.patientNumber': search }, { 'patient.phone': search },
+      { 'doctor.searchName': search }, { 'doctor.firstName': search }, { 'doctor.lastName': search },
+      { 'doctor.specialty': search }, { reason: search },
+    ] } });
   }
-  const total = appointments.length;
-  const skip = (query.page - 1) * query.limit;
+  const direction = query.sortOrder === 'asc' ? 1 : -1;
+  pipeline.push({ $sort: { startAt: direction, _id: 1 } });
+  pipeline.push({ $facet: {
+    metadata: [{ $count: 'total' }],
+    records: [
+      { $skip: (query.page - 1) * query.limit },
+      { $limit: query.limit },
+      { $project: {
+        startAt: 1, durationMinutes: 1, reason: 1, notes: 1, scheduleOverrideReason: 1, status: 1, createdAt: 1, updatedAt: 1,
+        patient: { _id: '$patient._id', firstName: '$patient.firstName', lastName: '$patient.lastName', patientNumber: '$patient.patientNumber' },
+        doctor: { _id: '$doctor._id', firstName: '$doctor.firstName', lastName: '$doctor.lastName', specialty: '$doctor.specialty' },
+      } },
+    ],
+  } });
+  const [result] = await Appointment.aggregate(pipeline).allowDiskUse(false);
+  const total = result?.metadata?.[0]?.total ?? 0;
+  const records = (result?.records ?? []) as unknown as PopulatedAppointment[];
   return {
-    appointments: appointments.slice(skip, skip + query.limit),
+    appointments: records.map(serialize),
     pagination: { page: query.page, limit: query.limit, total, totalPages: Math.ceil(total / query.limit) },
   };
 }
@@ -123,6 +174,7 @@ export async function createAppointment(input: AppointmentInput) {
   const id = await withDoctorLocks([input.doctorId], async (assertLocksOwned) =>
     inTransaction(async (session) => {
       await assertParticipants(input.patientId, input.doctorId, session);
+      if (!['cancelled', 'no_show'].includes(input.status)) await assertWithinWorkingHours(input.doctorId, start, input.durationMinutes, input.scheduleOverrideReason, session);
       await bumpDoctorScheduleVersion([input.doctorId], session);
       if (!['cancelled', 'no_show'].includes(input.status)) {
         await assertNoConflict(input.doctorId, start, input.durationMinutes, session);
@@ -160,6 +212,8 @@ export async function updateAppointment(id: string, input: AppointmentUpdate) {
       const status = input.status ?? current.status;
 
       if (input.patientId || input.doctorId) await assertParticipants(patientId, doctorId, session);
+      const scheduleChanged = Boolean(input.startAt || input.doctorId || input.durationMinutes || input.scheduleOverrideReason);
+      if (scheduleChanged && !['cancelled', 'no_show'].includes(status)) await assertWithinWorkingHours(doctorId, start, duration, input.scheduleOverrideReason ?? current.scheduleOverrideReason, session);
       await bumpDoctorScheduleVersion([currentDoctorId, doctorId], session);
 
       if (!['cancelled', 'no_show'].includes(status)) {

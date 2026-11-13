@@ -18,6 +18,8 @@ function serializeDoctor(doctor: DoctorRecord) {
     email: doctor.email,
     phone: doctor.phone,
     specialty: doctor.specialty,
+    hospital: doctor.hospital,
+    workingHours: doctor.workingHours ?? [],
     licenseNumber: doctor.licenseNumber,
     yearsOfExperience: doctor.yearsOfExperience,
     consultationFee: doctor.consultationFee,
@@ -54,6 +56,7 @@ function handleDuplicate(error: unknown): never {
 export async function listDoctors(query: DoctorListQuery) {
   const filter: Record<string, unknown> = {};
   if (query.status) filter.status = query.status;
+  if (query.dateFrom || query.dateTo) filter.createdAt = { ...(query.dateFrom ? { $gte: new Date(query.dateFrom) } : {}), ...(query.dateTo ? { $lt: new Date(query.dateTo) } : {}) };
   if (query.specialty)
     filter.specialty = { $regex: '^' + escapeRegex(query.specialty) + '$', $options: 'i' };
   if (query.search) {
@@ -124,4 +127,31 @@ export async function deleteDoctor(id: string): Promise<void> {
   }
   const doctor = await Doctor.findByIdAndDelete(id);
   if (!doctor) throw new AppError(404, 'DOCTOR_NOT_FOUND', 'Doctor not found.');
+}
+
+
+export async function listDoctorPatients(id: string, page = 1, limit = 10) {
+  const doctor = await Doctor.findById(id).select('_id').lean();
+  if (!doctor) throw new AppError(404, 'DOCTOR_NOT_FOUND', 'Doctor not found.');
+  const filter = { assignedDoctor: id };
+  const [records, total] = await Promise.all([
+    Patient.find(filter).sort({ createdAt: -1, _id: 1 }).skip((page - 1) * limit).limit(limit).lean(),
+    Patient.countDocuments(filter),
+  ]);
+  return {
+    patients: records.map((patient) => ({
+      id: patient._id.toString(), patientNumber: patient.patientNumber,
+      firstName: patient.firstName, lastName: patient.lastName, phone: patient.phone,
+      condition: patient.condition ?? null, status: patient.status,
+      createdAt: patient.createdAt.toISOString(),
+    })),
+    pagination: { page, limit, total, totalPages: Math.ceil(total / limit) },
+  };
+}
+
+export async function unassignDoctorPatient(doctorId: string, patientId: string) {
+  const doctor = await Doctor.findById(doctorId).select('_id').lean();
+  if (!doctor) throw new AppError(404, 'DOCTOR_NOT_FOUND', 'Doctor not found.');
+  const result = await Patient.updateOne({ _id: patientId, assignedDoctor: doctorId }, { $set: { assignedDoctor: null } });
+  if (result.matchedCount !== 1) throw new AppError(404, 'ASSIGNED_PATIENT_NOT_FOUND', 'This patient is not assigned to the selected doctor.');
 }

@@ -13,6 +13,7 @@ export const appointmentInputSchema = z.object({
   durationMinutes: durationMinutes.default(30),
   reason: z.string().trim().max(500).nullable().optional(),
   notes: z.string().trim().max(2000).nullable().optional(),
+  scheduleOverrideReason: z.string().trim().min(5).max(500).nullable().optional(),
   status: status.default('scheduled'),
 }).strict();
 
@@ -23,6 +24,7 @@ export const appointmentUpdateSchema = z.object({
   durationMinutes: durationMinutes.optional(),
   reason: z.string().trim().max(500).nullable().optional(),
   notes: z.string().trim().max(2000).nullable().optional(),
+  scheduleOverrideReason: z.string().trim().min(5).max(500).nullable().optional(),
   status: status.optional(),
 }).strict().refine((value) => Object.keys(value).length > 0, 'At least one field must be provided.');
 
@@ -51,6 +53,7 @@ export const appointmentResponseSchema = z.object({
   durationMinutes: z.number(),
   reason: z.string().nullable(),
   notes: z.string().nullable(),
+  scheduleOverrideReason: z.string().nullable(),
   status,
   createdAt: z.string(),
   updatedAt: z.string(),

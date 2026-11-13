@@ -32,13 +32,13 @@ describe('appointments MongoDB integration', () => {
     adminId = admin._id.toString();
     const doctor = await Doctor.create({
       firstName: 'Appointment', lastName: 'Doctor', email: `appointment-doctor-${suffix}@example.com`,
-      phone: '+8801700000410', specialty: 'General Medicine', licenseNumber: `AP-${suffix}`,
+      phone: '+8801700000410', specialty: 'General Medicine', hospital: 'Integration Hospital', workingHours: Array.from({ length: 7 }, (_, dayOfWeek) => ({ dayOfWeek, startTime: '00:00', endTime: '23:59' })), licenseNumber: `AP-${suffix}`,
       yearsOfExperience: 8, consultationFee: 1000, status: 'active',
     });
     doctorId = doctor._id.toString();
     const secondDoctor = await Doctor.create({
       firstName: 'Independent', lastName: 'Doctor', email: `independent-doctor-${suffix}@example.com`,
-      phone: '+8801700000412', specialty: 'Cardiology', licenseNumber: `AP2-${suffix}`,
+      phone: '+8801700000412', specialty: 'Cardiology', hospital: 'Integration Hospital', workingHours: [], licenseNumber: `AP2-${suffix}`,
       yearsOfExperience: 12, consultationFee: 1500, status: 'active',
     });
     secondDoctorId = secondDoctor._id.toString();
@@ -91,9 +91,18 @@ describe('appointments MongoDB integration', () => {
     expect(appointment.patient.fullName).toBe('Appointment Patient');
     expect(await Appointment.findById(appointment.id)).not.toBeNull();
 
-    const list = await app.request({ method: 'GET', url: '/api/v1/appointments?status=scheduled', headers: { cookie } });
+    const list = await app.request({ method: 'GET', url: '/api/v1/appointments?status=scheduled&search=Appointment%20Patient', headers: { cookie } });
     expect(list.statusCode).toBe(200);
     expect(list.json().data.appointments.some((item: { id: string }) => item.id === appointment.id)).toBe(true);
+
+    const noScheduleStart = new Date(startAt.getTime() + 8 * 60 * 60_000).toISOString();
+    const rejectedWithoutReason = await app.request({ method: 'POST', url: '/api/v1/appointments', headers: { cookie }, payload: { ...payload, doctorId: secondDoctorId, startAt: noScheduleStart } });
+    expect(rejectedWithoutReason.statusCode).toBe(400);
+    expect(rejectedWithoutReason.json().error.code).toBe('SCHEDULE_OVERRIDE_REQUIRED');
+    const override = await app.request({ method: 'POST', url: '/api/v1/appointments', headers: { cookie }, payload: { ...payload, doctorId: secondDoctorId, startAt: noScheduleStart, scheduleOverrideReason: 'Doctor approved an additional consultation.' } });
+    expect(override.statusCode).toBe(201);
+    appointmentIds.push(override.json().data.appointment.id);
+    expect(override.json().data.appointment.scheduleOverrideReason).toContain('Doctor approved');
 
     const conflict = await app.request({ method: 'POST', url: '/api/v1/appointments', headers: { cookie }, payload });
     expect(conflict.statusCode).toBe(409);
@@ -115,7 +124,7 @@ describe('appointments MongoDB integration', () => {
     const independentStart = new Date(startAt.getTime() + 4 * 60 * 60_000).toISOString();
     const independent = await Promise.all([
       app.request({ method: 'POST', url: '/api/v1/appointments', headers: { cookie }, payload: { ...payload, startAt: independentStart } }),
-      app.request({ method: 'POST', url: '/api/v1/appointments', headers: { cookie }, payload: { ...payload, doctorId: secondDoctorId, startAt: independentStart } }),
+      app.request({ method: 'POST', url: '/api/v1/appointments', headers: { cookie }, payload: { ...payload, doctorId: secondDoctorId, startAt: independentStart, scheduleOverrideReason: 'Doctor approved an additional consultation.' } }),
     ]);
     expect(independent.map((response) => response.statusCode).sort()).toEqual([201, 201]);
     for (const response of independent) appointmentIds.push(response.json().data.appointment.id);

@@ -9,6 +9,7 @@ const appointmentSchema = new Schema({
   durationMinutes: { type: Number, required: true, min: 5, max: 480, default: 30 },
   reason: { type: String, trim: true, maxlength: 500, default: null },
   notes: { type: String, trim: true, maxlength: 2000, default: null },
+  scheduleOverrideReason: { type: String, trim: true, maxlength: 500, default: null },
   status: { type: String, enum: appointmentStatuses, required: true, default: 'scheduled' },
 }, { timestamps: true, versionKey: false });
 

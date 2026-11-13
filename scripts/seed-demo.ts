@@ -36,7 +36,7 @@ async function main() {
       const email = `demo.doctor.${item.key}@doctortracker.local`;
       const doctor = await Doctor.findOneAndUpdate(
         { email },
-        { $set: { firstName: item.firstName, lastName: item.lastName, phone: item.phone, specialty: item.specialty, licenseNumber: `DEMO-${item.key.toUpperCase()}-001`, yearsOfExperience: item.yearsOfExperience, consultationFee: item.consultationFee, status: 'active' }, $setOnInsert: { email, scheduleVersion: 0 } },
+        { $set: { firstName: item.firstName, lastName: item.lastName, phone: item.phone, specialty: item.specialty, hospital: 'Demo General Hospital', workingHours: [{ dayOfWeek: 0, startTime: '09:00', endTime: '17:00' }, { dayOfWeek: 1, startTime: '09:00', endTime: '17:00' }, { dayOfWeek: 2, startTime: '09:00', endTime: '17:00' }, { dayOfWeek: 3, startTime: '09:00', endTime: '17:00' }, { dayOfWeek: 4, startTime: '09:00', endTime: '17:00' }, { dayOfWeek: 6, startTime: '09:00', endTime: '13:00' }], licenseNumber: `DEMO-${item.key.toUpperCase()}-001`, yearsOfExperience: item.yearsOfExperience, consultationFee: item.consultationFee, status: 'active' }, $setOnInsert: { email, scheduleVersion: 0 } },
         { upsert: true, returnDocument: 'after', runValidators: true, setDefaultsOnInsert: true },
       );
       doctorByKey.set(item.key, doctor._id.toString());
@@ -57,7 +57,14 @@ async function main() {
 
     // Deterministic, non-overlapping records cover historical and upcoming dashboard/calendar states.
     const now = new Date();
+    // All demo appointment slots are expressed in Dhaka wall-clock time (UTC+6).
+    const dhakaNow = new Date(now.getTime() + 6 * 60 * 60_000);
     const slots = [
+      { patient: 0, doctor: 'rahman', day: 0, hour: 9, status: 'confirmed', reason: 'DEMO-SEED:today-cardiac-review' },
+      { patient: 1, doctor: 'rahman', day: 0, hour: 10, status: 'scheduled', reason: 'DEMO-SEED:today-bp-check' },
+      { patient: 10, doctor: 'rahman', day: 0, hour: 11, status: 'completed', reason: 'DEMO-SEED:today-cardiology-follow-up' },
+      { patient: 2, doctor: 'karim', day: 0, hour: 9, status: 'confirmed', reason: 'DEMO-SEED:today-neurology-review' },
+      { patient: 3, doctor: 'karim', day: 0, hour: 10, status: 'scheduled', reason: 'DEMO-SEED:today-headache-consult' },
       { patient: 0, doctor: 'rahman', day: -35, hour: 9, status: 'completed', reason: 'DEMO-SEED:annual-cardiac-review' },
       { patient: 1, doctor: 'rahman', day: -20, hour: 10, status: 'completed', reason: 'DEMO-SEED:blood-pressure-follow-up' },
       { patient: 10, doctor: 'rahman', day: -5, hour: 11, status: 'no_show', reason: 'DEMO-SEED:missed-cardiology-visit' },
@@ -77,11 +84,19 @@ async function main() {
     ] as const;
 
     for (const slot of slots) {
-      const startAt = new Date(now);
-      startAt.setUTCDate(startAt.getUTCDate() + slot.day);
-      startAt.setUTCHours(slot.hour, 0, 0, 0);
-      // Keep future bookings safely in the future even if this script is run late in the day.
-      if (slot.day > 0 && startAt <= now) startAt.setUTCDate(startAt.getUTCDate() + 1);
+      let startAt = new Date(Date.UTC(
+        dhakaNow.getUTCFullYear(),
+        dhakaNow.getUTCMonth(),
+        dhakaNow.getUTCDate() + slot.day,
+        slot.hour - 6,
+        0,
+        0,
+        0,
+      ));
+      // Keep upcoming bookings safely in the future if the seed runs after the selected hour.
+      if (slot.day >= 0 && startAt <= now) {
+        startAt = new Date(startAt.getTime() + 24 * 60 * 60_000);
+      }
       const doctor = doctorByKey.get(slot.doctor)!;
       await Appointment.findOneAndUpdate(
         { reason: slot.reason },

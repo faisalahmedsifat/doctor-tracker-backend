@@ -48,13 +48,15 @@ For browser requests, configure `FRONTEND_ORIGIN` to the exact frontend origin. 
 
 All doctor endpoints require an authenticated administrator:
 
-- `GET /api/v1/doctors` — paginated directory; supports `page`, `limit` (maximum 100), `search`, `specialty`, `status`, `sortBy`, and `sortOrder`.
+- `GET /api/v1/doctors` — paginated directory; supports `page`, `limit` (maximum 100), `search`, `specialty`, `status`, `dateFrom`, `dateTo`, `sortBy`, and `sortOrder`.
 - `GET /api/v1/doctors/:id` — retrieve one doctor.
 - `POST /api/v1/doctors` — create a doctor.
 - `PATCH /api/v1/doctors/:id` — update supplied fields.
+- `GET /api/v1/doctors/:id/patients` — list the patients assigned to a doctor.
+- `DELETE /api/v1/doctors/:id/patients/:patientId` — unassign a patient without deleting their record.
 - `DELETE /api/v1/doctors/:id` — permanently delete a doctor.
 
-Doctor email and medical-license number are unique. The API validates and normalizes email/license values, bounds numeric inputs, allow-lists sorting, escapes search terms, and translates duplicate-key races into HTTP 409 responses. Doctor documents use timestamps and indexes for unique identifiers and common directory queries. A doctor with assigned patients or linked appointments cannot be deleted until those references are resolved, preserving referential integrity.
+Doctor records include hospital affiliation and an explicit weekly working-hours schedule (weekday plus start/end time in Asia/Dhaka); an empty schedule means availability is not configured, not that the doctor is available all day. Doctor email and medical-license number are unique. The API validates and normalizes email/license values, bounds numeric inputs, allow-lists sorting, escapes search terms, and translates duplicate-key races into HTTP 409 responses. Doctor documents use timestamps and indexes for unique identifiers and common directory queries. A doctor with assigned patients or linked appointments cannot be deleted until those references are resolved, preserving referential integrity.
 
 **Production index rollout:** create the Doctor model indexes before enabling doctor writes in production. Mongoose automatic index creation is disabled in production by design; run an explicit index migration/deployment step rather than relying on application startup to create indexes.
 
@@ -68,7 +70,7 @@ All appointment endpoints require an authenticated administrator:
 - `PATCH /api/v1/appointments/:id` — reschedule, reassign, edit notes/reason, duration or lifecycle status.
 - `DELETE /api/v1/appointments/:id` — permanently delete an appointment.
 
-Appointments store a UTC instant and a duration in minutes. The API requires active patient and doctor records, rejects past scheduling, and checks overlapping intervals for the same doctor (adjacent appointments are allowed). Cancelled and no-show appointments do not block a slot. Supported statuses are `scheduled`, `confirmed`, `completed`, `cancelled`, and `no_show`.
+Appointments store a UTC instant and a duration in minutes. The API requires active patient and doctor records, rejects past scheduling, requires an administrator-recorded override reason outside configured working hours or when hours are not configured, and checks overlapping intervals for the same doctor (adjacent appointments are allowed). Cancelled and no-show appointments do not block a slot. Supported statuses are `scheduled`, `confirmed`, `completed`, `cancelled`, and `no_show`.
 
 **Concurrency and conflict management:** scheduling writes acquire a Redis per-doctor lease (`SET NX PX`) with unique ownership tokens, periodic lease renewal, and Lua compare-and-delete release. Multi-doctor updates acquire locks in sorted order to avoid lock-order deadlocks. Redis is a coordination layer, not the source of truth: each create/update/delete also runs in a MongoDB transaction and increments a hidden `scheduleVersion` on every affected doctor document. That shared write serializes competing transactions for a doctor's schedule; after a transaction retry, the overlap query sees the winning committed appointment. Transactions use snapshot reads and majority write concern. If Redis is unavailable or a lease is lost, scheduling fails closed. MongoDB must be a replica set; the local Compose stack configures a single-node `rs0` replica set, which supports transactions for development but is not a high-availability topology. The production deployment should use a properly managed replica set and highly available Redis.
 
@@ -82,7 +84,7 @@ The overview is computed from MongoDB on request; it contains no seeded/sample m
 
 All patient endpoints require an authenticated administrator:
 
-- `GET /api/v1/patients` — paginated directory with search, status, assigned-doctor and sorting filters.
+- `GET /api/v1/patients` — paginated directory with search, status, assigned-doctor, condition/diagnosis, registration date-range and sorting filters.
 - `GET /api/v1/patients/:id` — retrieve one patient, including the assigned doctor summary.
 - `POST /api/v1/patients` — create a patient and generate an immutable `PT-` patient number.
 - `PATCH /api/v1/patients/:id` — update supplied fields.

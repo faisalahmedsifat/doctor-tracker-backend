@@ -137,7 +137,11 @@ This document records the reasoning behind the system's initial architecture. Up
 
 **Rationale:** Scheduling is an independent lifecycle, and an appointment occupies a half-open interval from start to start + duration. Checking interval overlap (rather than only matching start times) correctly rejects partial overlaps while allowing adjacent visits. Cancelled and no-show records do not reserve capacity.
 
-**Trade-off:** The current conflict check is a read-before-write application check. It is correct for sequential requests but is not serializable under simultaneous booking attempts on different API instances. Production scheduling with concurrent writers needs a transactional slot-lock or discrete slot-allocation design. Date filters are converted by the browser from the selected local calendar days into ISO instants (inclusive start, exclusive next-day end), so clinics see their own local day boundaries without relying on the API server timezone.
+**Rationale:** Appointments are half-open intervals. A booking conflicts when an active appointment starts before the proposed end and ends after the proposed start. Cancelled and no-show appointments do not reserve capacity. Search, sorting, filtering, counting, and page slicing run in MongoDB through an aggregation pipeline; the API does not load every matching appointment into Node.js. Date boundaries are sent as ISO instants for the clinic's Asia/Dhaka calendar day.
+
+**Concurrency controls:** Booking and rescheduling acquire a short-lived Redis doctor lock, then run a MongoDB transaction. The transaction increments the doctor's `scheduleVersion`, forcing concurrent writes for the same doctor to contend on a shared document and retry/abort rather than both committing a conflicting interval. Lock ownership is checked before transaction completion. Redis failure fails closed.
+
+**Trade-off:** This design uses both Redis coordination and MongoDB transactional serialization, increasing operational complexity. A local single-node replica set and single Redis instance are development conveniences, not high-availability production infrastructure. Production requires a multi-member MongoDB replica set and highly available Redis. We do not claim that the local environment provides HA.
 
 ## 17. Validate and bound list queries at the API boundary
 

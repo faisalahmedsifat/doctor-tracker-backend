@@ -30,6 +30,7 @@ export const patientInputSchema = z
     email: email.nullable().optional(),
     address: optionalText(300).optional(),
     bloodGroup: bloodGroup.nullable().optional(),
+    condition: optionalText(500).optional(),
     emergencyContactName: optionalText(120).optional(),
     emergencyContactPhone: phone.nullable().optional(),
     assignedDoctorId: z
@@ -51,6 +52,7 @@ export const patientUpdateSchema = z
     email: email.nullable().optional(),
     address: optionalText(300).optional(),
     bloodGroup: bloodGroup.nullable().optional(),
+    condition: optionalText(500).optional(),
     emergencyContactName: optionalText(120).optional(),
     emergencyContactPhone: phone.nullable().optional(),
     assignedDoctorId: z
@@ -77,7 +79,10 @@ export const patientListQuerySchema = z.object({
     .optional(),
   sortBy: z.enum(['name', 'createdAt', 'dateOfBirth']).default('createdAt'),
   sortOrder: z.enum(['asc', 'desc']).default('desc'),
-});
+  dateFrom: z.string().datetime({ offset: true }).optional(),
+  dateTo: z.string().datetime({ offset: true }).optional(),
+  condition: z.string().trim().max(120).optional(),
+}).refine((v) => !v.dateFrom || !v.dateTo || v.dateFrom <= v.dateTo, { message: 'dateFrom must be on or before dateTo.', path: ['dateTo'] });
 
 export const patientResponseSchema = z.object({
   id: z.string(),
@@ -90,6 +95,7 @@ export const patientResponseSchema = z.object({
   email: z.string().email().nullable(),
   address: z.string().nullable(),
   bloodGroup: bloodGroup.nullable(),
+  condition: z.string().nullable(),
   emergencyContactName: z.string().nullable(),
   emergencyContactPhone: z.string().nullable(),
   assignedDoctor: z
