@@ -6,14 +6,16 @@ A modular REST API built with Fastify 5, TypeScript, Zod, and MongoDB/Mongoose.
 
 - Node.js 22+
 - pnpm 12+
-- MongoDB 7+ or MongoDB Atlas
+- MongoDB 7+ configured as a replica set (required for appointment transactions)
+- Redis 7+
 
 ## Getting started
 
 ```bash
 pnpm install
 cp .env.example .env
-# Set strong local secrets and your MongoDB connection string in .env
+# Set strong local secrets in .env
+docker compose up -d
 pnpm dev
 ```
 
@@ -66,7 +68,9 @@ All appointment endpoints require an authenticated administrator:
 - `PATCH /api/v1/appointments/:id` — reschedule, reassign, edit notes/reason, duration or lifecycle status.
 - `DELETE /api/v1/appointments/:id` — permanently delete an appointment.
 
-Appointments store a UTC instant and a duration in minutes. The API requires active patient and doctor records, rejects past scheduling, and checks overlapping intervals for the same doctor (adjacent appointments are allowed). Cancelled and no-show appointments do not block a slot. Supported statuses are `scheduled`, `confirmed`, `completed`, `cancelled`, and `no_show`. The overlap check is an application-level check; if the system is deployed with concurrent scheduling traffic across multiple API instances, use a transactional slot-allocation/locking strategy to make conflict prevention serializable.
+Appointments store a UTC instant and a duration in minutes. The API requires active patient and doctor records, rejects past scheduling, and checks overlapping intervals for the same doctor (adjacent appointments are allowed). Cancelled and no-show appointments do not block a slot. Supported statuses are `scheduled`, `confirmed`, `completed`, `cancelled`, and `no_show`.
+
+**Concurrency and conflict management:** scheduling writes acquire a Redis per-doctor lease (`SET NX PX`) with unique ownership tokens, periodic lease renewal, and Lua compare-and-delete release. Multi-doctor updates acquire locks in sorted order to avoid lock-order deadlocks. Redis is a coordination layer, not the source of truth: each create/update/delete also runs in a MongoDB transaction and increments a hidden `scheduleVersion` on every affected doctor document. That shared write serializes competing transactions for a doctor's schedule; after a transaction retry, the overlap query sees the winning committed appointment. Transactions use snapshot reads and majority write concern. If Redis is unavailable or a lease is lost, scheduling fails closed. MongoDB must be a replica set; the local Compose stack configures a single-node `rs0` replica set, which supports transactions for development but is not a high-availability topology. The production deployment should use a properly managed replica set and highly available Redis.
 
 ## Dashboard API
 
@@ -92,14 +96,14 @@ Patient records validate birth dates and contact details, normalize email, and v
 - `pnpm typecheck` — TypeScript validation
 - `pnpm lint` — ESLint
 - `pnpm test` — run isolated unit and HTTP-boundary tests (no database required)
-- `pnpm test:integration` — run MongoDB-backed API integration tests (requires the configured MongoDB instance)
+- `pnpm test:integration` — run MongoDB/Redis-backed API integration tests (requires the configured replica set and Redis instance)
 - `pnpm build` — production build
 - `pnpm start` — run production build
 - `pnpm seed:admin` — one-time administrator bootstrap
 
 ## Architecture
 
-Feature modules own routes, schemas, services, repositories, and models. Routes handle HTTP concerns; services contain business rules; persistence models are isolated by feature. Shared concerns live under `common/`. The API is versioned under `/api/v1`.
+Feature modules own routes, schemas, services, repositories, and models. Routes handle HTTP concerns; services contain business rules; persistence models are isolated by feature. Shared concerns live under `common/`. Redis connection lifecycle is managed under `database/redis.ts`; the API is versioned under `/api/v1`.
 
 ## Security
 

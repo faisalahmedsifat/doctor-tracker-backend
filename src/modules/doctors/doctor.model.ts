@@ -10,6 +10,8 @@ const doctorSchema = new Schema({
   yearsOfExperience: { type: Number, required: true, min: 0, max: 70 },
   consultationFee: { type: Number, required: true, min: 0, max: 1000000 },
   status: { type: String, enum: ['active', 'inactive'], default: 'active', required: true },
+  // A transactional write serializes concurrent appointment changes for this doctor.
+  scheduleVersion: { type: Number, default: 0, select: false },
 }, { timestamps: true, versionKey: false });
 
 doctorSchema.index({ email: 1 }, { unique: true });

@@ -1,7 +1,9 @@
+import mongoose, { type ClientSession } from 'mongoose';
 import { AppError } from '../../common/errors.js';
 import { Doctor } from '../doctors/doctor.model.js';
 import { Patient } from '../patients/patient.model.js';
 import { Appointment, type AppointmentDocument } from './appointment.model.js';
+import { withDoctorLocks } from './appointment-lock.service.js';
 import type { AppointmentInput, AppointmentListQuery, AppointmentUpdate } from './appointment.schemas.js';
 
 type AppointmentStatus = 'scheduled' | 'confirmed' | 'completed' | 'cancelled' | 'no_show';
@@ -29,27 +31,33 @@ function serialize(record: PopulatedAppointment) {
   };
 }
 
-async function assertParticipants(patientId: string, doctorId: string) {
-  const [patient, doctor] = await Promise.all([
-    Patient.findById(patientId).select('_id status').lean(),
-    Doctor.findById(doctorId).select('_id status').lean(),
-  ]);
+async function assertParticipants(patientId: string, doctorId: string, session?: ClientSession) {
+  // MongoDB does not support parallel operations on a single transaction session.
+  const patient = await Patient.findById(patientId).select('_id status').session(session ?? null).lean();
+  const doctor = await Doctor.findById(doctorId).select('_id status').session(session ?? null).lean();
   if (!patient || patient.status !== 'active') throw new AppError(400, 'INVALID_PATIENT', 'Select an existing active patient.');
   if (!doctor || doctor.status !== 'active') throw new AppError(400, 'INVALID_DOCTOR', 'Select an existing active doctor.');
 }
 
-async function assertNoConflict(doctorId: string, start: Date, duration: number, excludeId?: string) {
+async function assertNoConflict(doctorId: string, start: Date, duration: number, session: ClientSession, excludeId?: string) {
   const end = new Date(start.getTime() + duration * 60_000);
   const candidates = await Appointment.find({
     doctor: doctorId,
     status: { $nin: ['cancelled', 'no_show'] },
     startAt: { $lt: end },
     ...(excludeId ? { _id: { $ne: excludeId } } : {}),
-  }).select('startAt durationMinutes').lean();
+  }).select('startAt durationMinutes').session(session).lean();
   const conflict = candidates.some((item) =>
     item.startAt.getTime() + item.durationMinutes * 60_000 > start.getTime(),
   );
   if (conflict) throw new AppError(409, 'APPOINTMENT_CONFLICT', 'This doctor already has an appointment during the selected time.');
+}
+
+async function bumpDoctorScheduleVersion(doctorIds: string[], session: ClientSession) {
+  for (const doctorId of [...new Set(doctorIds)].sort()) {
+    const result = await Doctor.updateOne({ _id: doctorId }, { $inc: { scheduleVersion: 1 } }, { session });
+    if (result.matchedCount !== 1) throw new AppError(404, 'DOCTOR_NOT_FOUND', 'The selected doctor no longer exists.');
+  }
 }
 
 function populated(query: ReturnType<typeof Appointment.find>) {
@@ -91,43 +99,109 @@ export async function getAppointment(id: string) {
   return serialize(record as unknown as PopulatedAppointment);
 }
 
+async function inTransaction<T>(operation: (session: ClientSession) => Promise<T>): Promise<T> {
+  const session = await mongoose.startSession();
+  try {
+    let result!: T;
+    await session.withTransaction(async () => {
+      result = await operation(session);
+    }, {
+      readConcern: { level: 'snapshot' },
+      writeConcern: { w: 'majority' },
+      readPreference: 'primary',
+      maxCommitTimeMS: 5000,
+    });
+    return result;
+  } finally {
+    await session.endSession();
+  }
+}
+
 export async function createAppointment(input: AppointmentInput) {
-  await assertParticipants(input.patientId, input.doctorId);
   const start = new Date(input.startAt);
   if (start <= new Date()) throw new AppError(400, 'APPOINTMENT_IN_PAST', 'Appointments must be scheduled in the future.');
-  if (!['cancelled', 'no_show'].includes(input.status)) await assertNoConflict(input.doctorId, start, input.durationMinutes);
-  const { patientId, doctorId, startAt, ...rest } = input;
-  const values = Object.fromEntries(Object.entries(rest).filter(([, value]) => value !== undefined));
-  const record = await Appointment.create({ ...values, patient: patientId, doctor: doctorId, startAt: new Date(startAt) } as never);
-  return getAppointment((record as unknown as AppointmentDocument & { _id: { toString(): string } })._id.toString());
+  const id = await withDoctorLocks([input.doctorId], async (assertLocksOwned) =>
+    inTransaction(async (session) => {
+      await assertParticipants(input.patientId, input.doctorId, session);
+      await bumpDoctorScheduleVersion([input.doctorId], session);
+      if (!['cancelled', 'no_show'].includes(input.status)) {
+        await assertNoConflict(input.doctorId, start, input.durationMinutes, session);
+      }
+      const { patientId, doctorId, startAt, ...rest } = input;
+      const values = Object.fromEntries(Object.entries(rest).filter(([, value]) => value !== undefined));
+      const [record] = await Appointment.create([{
+        ...values, patient: patientId, doctor: doctorId, startAt: new Date(startAt),
+      }], { session });
+      assertLocksOwned();
+      return (record as AppointmentDocument & { _id: { toString(): string } })._id.toString();
+    }),
+  );
+  return getAppointment(id);
 }
 
 export async function updateAppointment(id: string, input: AppointmentUpdate) {
-  const current = await Appointment.findById(id).lean();
-  if (!current) throw new AppError(404, 'APPOINTMENT_NOT_FOUND', 'Appointment not found.');
-  const patientId = input.patientId ?? current.patient.toString();
-  const doctorId = input.doctorId ?? current.doctor.toString();
-  const start = input.startAt ? new Date(input.startAt) : current.startAt;
-  const duration = input.durationMinutes ?? current.durationMinutes;
-  const status = input.status ?? current.status;
-  if (input.patientId || input.doctorId) await assertParticipants(patientId, doctorId);
-  if (!['cancelled', 'no_show'].includes(status)) {
-    const schedulingChanged = Boolean(input.startAt || input.doctorId || input.durationMinutes);
-    const statusChangedToUpcoming = Boolean(input.status && ['scheduled', 'confirmed'].includes(status));
-    if ((schedulingChanged || statusChangedToUpcoming) && start <= new Date()) throw new AppError(400, 'APPOINTMENT_IN_PAST', 'Active appointments must be scheduled in the future.');
-    await assertNoConflict(doctorId, start, duration, id);
-  }
-  const values = Object.fromEntries(Object.entries(input).filter(([key, value]) =>
-    !['patientId', 'doctorId', 'startAt'].includes(key) && value !== undefined,
-  ));
-  const startAt = input.startAt;
-  await Appointment.findByIdAndUpdate(id, {
-    $set: { ...values, ...(input.patientId ? { patient: patientId } : {}), ...(input.doctorId ? { doctor: doctorId } : {}), ...(startAt ? { startAt: start } : {}) },
-  }, { returnDocument: 'after', runValidators: true });
+  const initial = await Appointment.findById(id).lean();
+  if (!initial) throw new AppError(404, 'APPOINTMENT_NOT_FOUND', 'Appointment not found.');
+  const initialDoctorId = initial.doctor.toString();
+  const targetDoctorId = input.doctorId ?? initialDoctorId;
+
+  await withDoctorLocks([initialDoctorId, targetDoctorId], async (assertLocksOwned) => {
+    await inTransaction(async (session) => {
+      const current = await Appointment.findById(id).session(session).lean();
+      if (!current) throw new AppError(404, 'APPOINTMENT_NOT_FOUND', 'Appointment not found.');
+      const currentDoctorId = current.doctor.toString();
+      if (currentDoctorId !== initialDoctorId) {
+        throw new AppError(409, 'APPOINTMENT_CHANGED_RETRY', 'This appointment was changed by another request. Refresh and try again.');
+      }
+      const patientId = input.patientId ?? current.patient.toString();
+      const doctorId = input.doctorId ?? currentDoctorId;
+      const start = input.startAt ? new Date(input.startAt) : current.startAt;
+      const duration = input.durationMinutes ?? current.durationMinutes;
+      const status = input.status ?? current.status;
+
+      if (input.patientId || input.doctorId) await assertParticipants(patientId, doctorId, session);
+      await bumpDoctorScheduleVersion([currentDoctorId, doctorId], session);
+
+      if (!['cancelled', 'no_show'].includes(status)) {
+        const schedulingChanged = Boolean(input.startAt || input.doctorId || input.durationMinutes);
+        const statusChangedToUpcoming = Boolean(input.status && ['scheduled', 'confirmed'].includes(status));
+        if ((schedulingChanged || statusChangedToUpcoming) && start <= new Date()) {
+          throw new AppError(400, 'APPOINTMENT_IN_PAST', 'Active appointments must be scheduled in the future.');
+        }
+        await assertNoConflict(doctorId, start, duration, session, id);
+      }
+
+      const values = Object.fromEntries(Object.entries(input).filter(([key, value]) =>
+        !['patientId', 'doctorId', 'startAt'].includes(key) && value !== undefined,
+      ));
+      await Appointment.updateOne({ _id: id }, {
+        $set: {
+          ...values,
+          ...(input.patientId ? { patient: patientId } : {}),
+          ...(input.doctorId ? { doctor: doctorId } : {}),
+          ...(input.startAt ? { startAt: start } : {}),
+        },
+      }, { session, runValidators: true });
+      assertLocksOwned();
+    });
+  });
   return getAppointment(id);
 }
 
 export async function deleteAppointment(id: string) {
-  const deleted = await Appointment.findByIdAndDelete(id);
-  if (!deleted) throw new AppError(404, 'APPOINTMENT_NOT_FOUND', 'Appointment not found.');
+  const initial = await Appointment.findById(id).lean();
+  if (!initial) throw new AppError(404, 'APPOINTMENT_NOT_FOUND', 'Appointment not found.');
+  const doctorId = initial.doctor.toString();
+  await withDoctorLocks([doctorId], async (assertLocksOwned) => {
+    await inTransaction(async (session) => {
+      const current = await Appointment.findById(id).session(session).lean();
+      if (!current) throw new AppError(404, 'APPOINTMENT_NOT_FOUND', 'Appointment not found.');
+      if (current.doctor.toString() !== doctorId) {
+        throw new AppError(409, 'APPOINTMENT_CHANGED_RETRY', 'This appointment was changed by another request. Refresh and try again.');
+      }
+      await bumpDoctorScheduleVersion([doctorId], session);
+      await Appointment.deleteOne({ _id: id }, { session });
+      assertLocksOwned();
+    });
+  });
 }

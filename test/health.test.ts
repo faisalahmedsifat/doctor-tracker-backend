@@ -23,7 +23,7 @@ describe('health endpoints', () => {
   it('reports not-ready when MongoDB is disconnected', async () => {
     const response = await app.inject({ method: 'GET', url: '/api/v1/health/ready' });
     expect(response.statusCode).toBe(503);
-    expect(response.json()).toEqual({ status: 'not_ready', database: 'disconnected' });
+    expect(response.json()).toEqual({ status: 'not_ready', database: 'disconnected', replicaSet: 'disconnected', redis: 'disconnected' });
   });
 
   it('exposes the API documentation', async () => {

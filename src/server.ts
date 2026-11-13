@@ -1,11 +1,13 @@
 import { buildApp } from './app.js';
 import { env } from './config/env.js';
 import { connectDatabase, disconnectDatabase } from './database/connection.js';
+import { connectRedis, disconnectRedis } from './database/redis.js';
 
 async function start(): Promise<void> {
   const app = await buildApp();
   try {
     await connectDatabase();
+    await connectRedis();
     await app.listen({ host: env.HOST, port: env.PORT });
     app.log.info({ port: env.PORT }, 'Doctor Tracker API is listening');
   } catch (error) {
@@ -18,6 +20,7 @@ async function start(): Promise<void> {
   const shutdown = async (signal: string) => {
     app.log.info({ signal }, 'Shutting down gracefully');
     await app.close();
+    await disconnectRedis();
     await disconnectDatabase();
     process.exit(0);
   };
