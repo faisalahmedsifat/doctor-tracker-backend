@@ -1,5 +1,5 @@
 [build]
-builder = "NIXPACKS"
+builder = "DOCKERFILE"
 buildCommand = "corepack enable && pnpm install --frozen-lockfile && pnpm build"
 
 [deploy]
