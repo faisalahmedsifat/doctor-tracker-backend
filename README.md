@@ -1,6 +1,6 @@
 # Doctor Tracker API
 
-A modular REST API built with Fastify 5, TypeScript, Zod, and MongoDB/Mongoose.
+A modular REST API built with Express 5, TypeScript, Zod, and MongoDB/Mongoose.
 
 ## Requirements
 

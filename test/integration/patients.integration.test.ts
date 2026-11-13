@@ -1,16 +1,17 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import mongoose from 'mongoose';
 import bcrypt from 'bcryptjs';
-import type { FastifyInstance } from 'fastify';
+import type { TestClient } from '../helpers/app.js';
 import { randomUUID } from 'node:crypto';
 import { buildApp } from '../../src/app.js';
+import { createTestClient } from '../helpers/app.js';
 import { env } from '../../src/config/env.js';
 import { Admin } from '../../src/modules/auth/admin.model.js';
 import { Doctor } from '../../src/modules/doctors/doctor.model.js';
 import { Patient } from '../../src/modules/patients/patient.model.js';
 
 describe('patient API + MongoDB integration', () => {
-  let app: FastifyInstance;
+  let app: TestClient;
   let adminId = '';
   let doctorId = '';
   let patientId = '';
@@ -40,12 +41,11 @@ describe('patient API + MongoDB integration', () => {
       status: 'active',
     });
     doctorId = doctor._id.toString();
-    app = await buildApp();
-    await app.ready();
+    app = createTestClient(buildApp());
+   ;
   }, 15000);
 
   afterAll(async () => {
-    if (app) await app.close();
     if (patientId) await Patient.deleteOne({ _id: patientId });
     if (doctorId) await Doctor.deleteOne({ _id: doctorId });
     if (adminId) await Admin.deleteOne({ _id: adminId });
@@ -53,7 +53,7 @@ describe('patient API + MongoDB integration', () => {
   });
 
   it('creates, assigns, searches, updates and deletes a patient record', async () => {
-    const login = await app.inject({
+    const login = await app.request({
       method: 'POST',
       url: '/api/v1/auth/login',
       payload: { email: adminEmail, password },
@@ -64,7 +64,7 @@ describe('patient API + MongoDB integration', () => {
     if (!rawCookie) throw new Error('Login response did not set an access cookie.');
     const cookie = rawCookie.split(';')[0];
 
-    const created = await app.inject({
+    const created = await app.request({
       method: 'POST',
       url: '/api/v1/patients',
       headers: { cookie },
@@ -87,7 +87,7 @@ describe('patient API + MongoDB integration', () => {
     expect(patient.patientNumber).toMatch(/^PT-[A-F0-9]{10}$/);
     expect(patient.assignedDoctor.fullName).toBe('Dr. Assigned Doctor');
     expect(await Patient.countDocuments({ _id: patientId, assignedDoctor: doctorId })).toBe(1);
-    const doctorDeleteBlocked = await app.inject({
+    const doctorDeleteBlocked = await app.request({
       method: 'DELETE',
       url: `/api/v1/doctors/${doctorId}`,
       headers: { cookie },
@@ -95,7 +95,7 @@ describe('patient API + MongoDB integration', () => {
     expect(doctorDeleteBlocked.statusCode).toBe(409);
     expect(doctorDeleteBlocked.json().error.code).toBe('DOCTOR_HAS_PATIENTS');
 
-    const listed = await app.inject({
+    const listed = await app.request({
       method: 'GET',
       url: `/api/v1/patients?search=${patientEmail}&assignedDoctorId=${doctorId}`,
       headers: { cookie },
@@ -103,7 +103,7 @@ describe('patient API + MongoDB integration', () => {
     expect(listed.statusCode).toBe(200);
     expect(listed.json().data.patients.map((item: { id: string }) => item.id)).toContain(patientId);
 
-    const updated = await app.inject({
+    const updated = await app.request({
       method: 'PATCH',
       url: `/api/v1/patients/${patientId}`,
       headers: { cookie },
@@ -113,7 +113,7 @@ describe('patient API + MongoDB integration', () => {
     expect(updated.json().data.patient.status).toBe('inactive');
     expect((await Patient.findById(patientId))?.bloodGroup).toBe('AB+');
 
-    const invalidDoctor = await app.inject({
+    const invalidDoctor = await app.request({
       method: 'POST',
       url: '/api/v1/patients',
       headers: { cookie },
@@ -128,7 +128,7 @@ describe('patient API + MongoDB integration', () => {
     });
     expect(invalidDoctor.statusCode).toBe(400);
 
-    const deleted = await app.inject({
+    const deleted = await app.request({
       method: 'DELETE',
       url: `/api/v1/patients/${patientId}`,
       headers: { cookie },

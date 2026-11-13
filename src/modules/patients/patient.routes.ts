@@ -1,115 +1,28 @@
-import type { FastifyPluginAsyncZod } from 'fastify-type-provider-zod';
-import { z } from 'zod';
-import {
-  createPatient,
-  deletePatient,
-  getPatient,
-  listPatients,
-  updatePatient,
-} from './patient.service.js';
-import {
-  patientIdParamsSchema,
-  patientInputSchema,
-  patientListQuerySchema,
-  patientListResponseSchema,
-  patientSingleResponseSchema,
-  patientUpdateSchema,
-} from './patient.schemas.js';
+import { Router, type Router as ExpressRouter } from 'express';
+import { AppError } from '../../common/errors.js';
+import { authenticate } from '../../plugins/authentication.js';
+import { createPatient, deletePatient, getPatient, listPatients, updatePatient } from './patient.service.js';
+import { patientIdParamsSchema, patientInputSchema, patientListQuerySchema, patientUpdateSchema } from './patient.schemas.js';
 
-const errorResponse = z.object({
-  success: z.literal(false),
-  error: z.object({ code: z.string(), message: z.string() }),
+export const patientRoutes: ExpressRouter = Router();
+patientRoutes.use(authenticate);
+patientRoutes.get('/', async (request, response, next) => {
+  try { response.json({ success: true, data: await listPatients(patientListQuerySchema.parse(request.query)) }); }
+  catch (error) { next(error instanceof Error && 'issues' in error ? new AppError(400, 'VALIDATION_ERROR', error.message) : error); }
 });
-
-export const patientRoutes: FastifyPluginAsyncZod = async (app) => {
-  app.addHook('preHandler', app.authenticate);
-
-  app.get(
-    '/',
-    {
-      schema: {
-        tags: ['Patients'],
-        summary: 'List patients',
-        querystring: patientListQuerySchema,
-        response: { 200: patientListResponseSchema },
-      },
-    },
-    async (request) => ({
-      success: true as const,
-      data: await listPatients(request.query),
-    }),
-  );
-
-  app.get(
-    '/:id',
-    {
-      schema: {
-        tags: ['Patients'],
-        summary: 'Get patient',
-        params: patientIdParamsSchema,
-        response: { 200: patientSingleResponseSchema, 404: errorResponse },
-      },
-    },
-    async (request) => ({
-      success: true as const,
-      data: { patient: await getPatient(request.params.id) },
-    }),
-  );
-
-  app.post(
-    '/',
-    {
-      schema: {
-        tags: ['Patients'],
-        summary: 'Create patient',
-        body: patientInputSchema,
-        response: { 201: patientSingleResponseSchema, 400: errorResponse },
-      },
-    },
-    async (request, reply) =>
-      reply.code(201).send({
-        success: true as const,
-        data: { patient: await createPatient(request.body) },
-      }),
-  );
-
-  app.patch(
-    '/:id',
-    {
-      schema: {
-        tags: ['Patients'],
-        summary: 'Update patient',
-        params: patientIdParamsSchema,
-        body: patientUpdateSchema,
-        response: {
-          200: patientSingleResponseSchema,
-          400: errorResponse,
-          404: errorResponse,
-        },
-      },
-    },
-    async (request) => ({
-      success: true as const,
-      data: { patient: await updatePatient(request.params.id, request.body) },
-    }),
-  );
-
-  app.delete(
-    '/:id',
-    {
-      schema: {
-        tags: ['Patients'],
-        summary: 'Delete patient',
-        params: patientIdParamsSchema,
-        response: {
-          200: z.object({ success: z.literal(true) }),
-          404: errorResponse,
-        },
-      },
-    },
-    async (request) => {
-      await deletePatient(request.params.id);
-      return { success: true as const };
-    },
-  );
-};
+patientRoutes.get('/:id', async (request, response, next) => {
+  try { const { id } = patientIdParamsSchema.parse(request.params); response.json({ success: true, data: { patient: await getPatient(id) } }); }
+  catch (error) { next(error instanceof Error && 'issues' in error ? new AppError(400, 'VALIDATION_ERROR', error.message) : error); }
+});
+patientRoutes.post('/', async (request, response, next) => {
+  try { const input = patientInputSchema.parse(request.body); response.status(201).json({ success: true, data: { patient: await createPatient(input) } }); }
+  catch (error) { next(error instanceof Error && 'issues' in error ? new AppError(400, 'VALIDATION_ERROR', error.message) : error); }
+});
+patientRoutes.patch('/:id', async (request, response, next) => {
+  try { const { id } = patientIdParamsSchema.parse(request.params); const input = patientUpdateSchema.parse(request.body); response.json({ success: true, data: { patient: await updatePatient(id, input) } }); }
+  catch (error) { next(error instanceof Error && 'issues' in error ? new AppError(400, 'VALIDATION_ERROR', error.message) : error); }
+});
+patientRoutes.delete('/:id', async (request, response, next) => {
+  try { const { id } = patientIdParamsSchema.parse(request.params); await deletePatient(id); response.json({ success: true }); }
+  catch (error) { next(error instanceof Error && 'issues' in error ? new AppError(400, 'VALIDATION_ERROR', error.message) : error); }
+});

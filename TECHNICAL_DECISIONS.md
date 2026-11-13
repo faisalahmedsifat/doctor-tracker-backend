@@ -4,7 +4,7 @@ This document records the reasoning behind the system's initial architecture. Up
 
 ## 1. Separate frontend and backend repositories
 
-**Decision:** Keep the Next.js frontend and Fastify API in independent Git repositories.
+**Decision:** Keep the Next.js frontend and Express API in independent Git repositories.
 
 **Context:** The assignment requests separate frontend and backend repository links and a separately deployed API URL.
 
@@ -12,14 +12,15 @@ This document records the reasoning behind the system's initial architecture. Up
 
 **Trade-off:** Cross-repository changes require coordinated API contract updates. We mitigate this with versioned endpoints, OpenAPI documentation, and shared response conventions.
 
-## 2. Fastify instead of Express
+## 2. Express 5 instead of Fastify
 
-**Decision:** Use Fastify 5 with TypeScript.
+**Decision:** Use Express 5 with TypeScript.
 
-**Rationale:** Fastify provides encapsulated plugins, structured logging, lifecycle hooks, schema-oriented request handling, and a lightweight core. It lets us demonstrate a modular backend without adopting a heavier application framework.
+**Rationale:** Express has a broad ecosystem and a familiar middleware/router model. Express 5 also forwards rejected promises from async route handlers to centralized error middleware. Application construction is separated from the Node HTTP listener so tests can exercise the app directly through Supertest.
 
-**Trade-off:** The plugin model and ecosystem conventions differ from Express, so contributors need to understand Fastify encapsulation and registration order.
+**Trade-off:** Express does not provide Fastify-style schema-driven request validation or response serialization. We explicitly parse Zod schemas at route boundaries, centralize authentication/error handling in middleware, and maintain OpenAPI documentation separately. Middleware order is part of the application's security and correctness contract.
 
+**Migration constraint:** The framework change intentionally did not alter Mongoose services, Redis appointment locks, MongoDB transaction semantics, or API response envelopes. See `MIGRATION_PLAN.md` for the migration record and verification results.
 ## 3. Modular monolith instead of microservices
 
 **Decision:** Keep auth, doctors, patients, and dashboard analytics as modules in one deployable API.

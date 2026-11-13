@@ -1,15 +1,16 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import mongoose from 'mongoose';
 import bcrypt from 'bcryptjs';
-import type { FastifyInstance } from 'fastify';
+import type { TestClient } from '../helpers/app.js';
 import { randomUUID } from 'node:crypto';
 import { buildApp } from '../../src/app.js';
+import { createTestClient } from '../helpers/app.js';
 import { env } from '../../src/config/env.js';
 import { Admin } from '../../src/modules/auth/admin.model.js';
 import { Doctor } from '../../src/modules/doctors/doctor.model.js';
 
 describe('doctor API + MongoDB integration', () => {
-  let app: FastifyInstance;
+  let app: TestClient;
   const suffix = randomUUID();
   const email = `doctor-test-${suffix}@example.com`;
   const adminEmail = `admin-test-${suffix}@example.com`;
@@ -25,19 +26,18 @@ describe('doctor API + MongoDB integration', () => {
       role: 'admin',
     });
     adminId = admin.id;
-    app = await buildApp();
-    await app.ready();
+    app = createTestClient(buildApp());
+   ;
   }, 15000);
 
   afterAll(async () => {
-    if (app) await app.close();
     await Doctor.deleteMany({ email });
     if (adminId) await Admin.deleteOne({ _id: adminId });
     await mongoose.disconnect();
   });
 
   async function loginCookie() {
-    const response = await app.inject({
+    const response = await app.request({
       method: 'POST',
       url: '/api/v1/auth/login',
       payload: { email: adminEmail, password },
@@ -51,7 +51,7 @@ describe('doctor API + MongoDB integration', () => {
 
   it('persists a doctor through create, read, filter, update and delete', async () => {
     const cookie = await loginCookie();
-    const created = await app.inject({
+    const created = await app.request({
       method: 'POST',
       url: '/api/v1/doctors',
       headers: { cookie },
@@ -73,7 +73,7 @@ describe('doctor API + MongoDB integration', () => {
     expect(doctor.licenseNumber).toBe(`TEST-${suffix.toUpperCase()}`);
     expect(await Doctor.countDocuments({ email })).toBe(1);
 
-    const fetched = await app.inject({
+    const fetched = await app.request({
       method: 'GET',
       url: `/api/v1/doctors/${doctor.id}`,
       headers: { cookie },
@@ -81,7 +81,7 @@ describe('doctor API + MongoDB integration', () => {
     expect(fetched.statusCode).toBe(200);
     expect(fetched.json().data.doctor.id).toBe(doctor.id);
 
-    const filtered = await app.inject({
+    const filtered = await app.request({
       method: 'GET',
       url: '/api/v1/doctors?search=Integration&status=active&page=1&limit=5',
       headers: { cookie },
@@ -91,7 +91,7 @@ describe('doctor API + MongoDB integration', () => {
       doctor.id,
     );
 
-    const updated = await app.inject({
+    const updated = await app.request({
       method: 'PATCH',
       url: `/api/v1/doctors/${doctor.id}`,
       headers: { cookie },
@@ -102,7 +102,7 @@ describe('doctor API + MongoDB integration', () => {
     expect(updated.json().data.doctor.status).toBe('inactive');
     expect((await Doctor.findById(doctor.id))?.consultationFee).toBe(1800);
 
-    const duplicate = await app.inject({
+    const duplicate = await app.request({
       method: 'POST',
       url: '/api/v1/doctors',
       headers: { cookie },
@@ -120,7 +120,7 @@ describe('doctor API + MongoDB integration', () => {
     });
     expect(duplicate.statusCode).toBe(409);
 
-    const deleted = await app.inject({
+    const deleted = await app.request({
       method: 'DELETE',
       url: `/api/v1/doctors/${doctor.id}`,
       headers: { cookie },
@@ -128,7 +128,7 @@ describe('doctor API + MongoDB integration', () => {
     expect(deleted.statusCode).toBe(200);
     expect(await Doctor.findById(doctor.id)).toBeNull();
 
-    const missing = await app.inject({
+    const missing = await app.request({
       method: 'GET',
       url: `/api/v1/doctors/${doctor.id}`,
       headers: { cookie },

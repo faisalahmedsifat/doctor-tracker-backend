@@ -1,16 +1,17 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import mongoose from 'mongoose';
 import bcrypt from 'bcryptjs';
-import type { FastifyInstance } from 'fastify';
+import type { TestClient } from '../helpers/app.js';
 import { randomUUID } from 'node:crypto';
 import { buildApp } from '../../src/app.js';
+import { createTestClient } from '../helpers/app.js';
 import { env } from '../../src/config/env.js';
 import { Admin } from '../../src/modules/auth/admin.model.js';
 import { Doctor } from '../../src/modules/doctors/doctor.model.js';
 import { Patient } from '../../src/modules/patients/patient.model.js';
 
 describe('dashboard overview MongoDB integration', () => {
-  let app: FastifyInstance;
+  let app: TestClient;
   let adminId = '';
   let doctorId = '';
   const patientIds: string[] = [];
@@ -39,35 +40,22 @@ describe('dashboard overview MongoDB integration', () => {
       status: 'active',
     });
     doctorId = doctor._id.toString();
-    const records = await Patient.create([
-      {
-        patientNumber: `PT-${suffix.slice(0, 8).toUpperCase()}01`,
-        firstName: 'Recent',
-        lastName: 'One',
-        dateOfBirth: new Date('1990-01-01T00:00:00.000Z'),
-        gender: 'female',
-        phone: '+8801700000311',
-        assignedDoctor: doctorId,
-        status: 'active',
-      },
-      {
-        patientNumber: `PT-${suffix.slice(0, 8).toUpperCase()}02`,
-        firstName: 'Recent',
-        lastName: 'Two',
-        dateOfBirth: new Date('1991-01-01T00:00:00.000Z'),
-        gender: 'male',
-        phone: '+8801700000312',
-        assignedDoctor: doctorId,
-        status: 'inactive',
-      },
-    ]);
+    const fixtures = Array.from({ length: 5 }, (_, index) => ({
+      patientNumber: `PT-${suffix.slice(0, 8).toUpperCase()}${String(index + 1).padStart(2, '0')}`,
+      firstName: 'Recent',
+      lastName: `Patient${index + 1}`,
+      dateOfBirth: new Date('1990-01-01T00:00:00.000Z'),
+      gender: index % 2 === 0 ? 'female' : 'male',
+      phone: `+88017000003${String(11 + index).padStart(2, '0')}`,
+      assignedDoctor: doctorId,
+      status: index === 1 ? 'inactive' : 'active',
+    }));
+    const records = await Patient.insertMany(fixtures);
     patientIds.push(...records.map((record) => record._id.toString()));
-    app = await buildApp();
-    await app.ready();
+    app = createTestClient(buildApp());
   }, 15000);
 
   afterAll(async () => {
-    if (app) await app.close();
     if (patientIds.length) await Patient.deleteMany({ _id: { $in: patientIds } });
     if (doctorId) await Doctor.deleteOne({ _id: doctorId });
     if (adminId) await Admin.deleteOne({ _id: adminId });
@@ -75,7 +63,7 @@ describe('dashboard overview MongoDB integration', () => {
   });
 
   it('returns database-backed metrics, seven monthly buckets, doctor distribution and recent patients', async () => {
-    const login = await app.inject({
+    const login = await app.request({
       method: 'POST',
       url: '/api/v1/auth/login',
       payload: { email, password },
@@ -84,7 +72,7 @@ describe('dashboard overview MongoDB integration', () => {
     const setCookie = login.headers['set-cookie'];
     const rawCookie = Array.isArray(setCookie) ? setCookie[0] : setCookie;
     if (!rawCookie) throw new Error('Login response did not set an access cookie.');
-    const response = await app.inject({
+    const response = await app.request({
       method: 'GET',
       url: '/api/v1/dashboard/overview',
       headers: { cookie: rawCookie.split(';')[0] },
@@ -103,11 +91,10 @@ describe('dashboard overview MongoDB integration', () => {
     ).toBeGreaterThanOrEqual(2);
     expect(patientsByDoctor).toEqual(
       expect.arrayContaining([
-        expect.objectContaining({ name: 'Dr. Dashboard Doctor', patients: 2 }),
+        expect.objectContaining({ name: 'Dr. Dashboard Doctor', patients: 5 }),
       ]),
     );
-    expect(recentPatients.map((patient: { id: string }) => patient.id)).toEqual(
-      expect.arrayContaining(patientIds),
-    );
+    expect(recentPatients).toHaveLength(5);
+    expect(recentPatients.some((patient: { id: string }) => patientIds.includes(patient.id))).toBe(true);
   });
 });

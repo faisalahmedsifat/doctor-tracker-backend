@@ -1,18 +1,18 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import type { FastifyInstance } from 'fastify';
+import type { TestClient } from './helpers/app.js';
 import { buildApp } from '../src/app.js';
+import { createTestClient } from './helpers/app.js';
 
 describe('dashboard access control', () => {
-  let app: FastifyInstance;
+  let app: TestClient;
   beforeAll(async () => {
-    app = await buildApp();
-    await app.ready();
+    app = createTestClient(buildApp());
+   ;
   });
   afterAll(async () => {
-    await app.close();
   });
   it('requires an authenticated administrator to read the overview', async () => {
-    const response = await app.inject({ method: 'GET', url: '/api/v1/dashboard/overview' });
+    const response = await app.request({ method: 'GET', url: '/api/v1/dashboard/overview' });
     expect(response.statusCode).toBe(401);
     expect(response.json().error.code).toBe('UNAUTHENTICATED');
   });

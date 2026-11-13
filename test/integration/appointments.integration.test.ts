@@ -1,9 +1,10 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import mongoose from 'mongoose';
 import bcrypt from 'bcryptjs';
-import type { FastifyInstance } from 'fastify';
+import type { TestClient } from '../helpers/app.js';
 import { randomUUID } from 'node:crypto';
 import { buildApp } from '../../src/app.js';
+import { createTestClient } from '../helpers/app.js';
 import { env } from '../../src/config/env.js';
 import { Admin } from '../../src/modules/auth/admin.model.js';
 import { Doctor } from '../../src/modules/doctors/doctor.model.js';
@@ -12,7 +13,7 @@ import { Appointment } from '../../src/modules/appointments/appointment.model.js
 import { connectRedis, disconnectRedis, getRedis } from '../../src/database/redis.js';
 
 describe('appointments MongoDB integration', () => {
-  let app: FastifyInstance;
+  let app: TestClient;
   let adminId = '';
   let doctorId = '';
   let secondDoctorId = '';
@@ -46,9 +47,9 @@ describe('appointments MongoDB integration', () => {
       dateOfBirth: new Date('1990-01-01T00:00:00.000Z'), gender: 'female', phone: '+8801700000411', status: 'active',
     });
     patientId = patient._id.toString();
-    app = await buildApp();
-    await app.ready();
-    const login = await app.inject({ method: 'POST', url: '/api/v1/auth/login', payload: { email, password } });
+    app = createTestClient(buildApp());
+   ;
+    const login = await app.request({ method: 'POST', url: '/api/v1/auth/login', payload: { email, password } });
     expect(login.statusCode).toBe(200);
     const setCookie = login.headers['set-cookie'];
     const rawCookie = Array.isArray(setCookie) ? setCookie[0] : setCookie;
@@ -57,7 +58,6 @@ describe('appointments MongoDB integration', () => {
   }, 15000);
 
   afterAll(async () => {
-    if (app) await app.close();
     if (appointmentIds.length) await Appointment.deleteMany({ _id: { $in: appointmentIds } });
     if (patientId) await Patient.deleteOne({ _id: patientId });
     if (doctorId) await Doctor.deleteOne({ _id: doctorId });
@@ -68,7 +68,7 @@ describe('appointments MongoDB integration', () => {
   });
 
   it('reports readiness only when MongoDB replica set and Redis are healthy', async () => {
-    const response = await app.inject({ method: 'GET', url: '/api/v1/health/ready' });
+    const response = await app.request({ method: 'GET', url: '/api/v1/health/ready' });
     expect(response.statusCode).toBe(200);
     expect(response.json()).toEqual({
       status: 'ready', database: 'connected', replicaSet: 'connected', redis: 'connected',
@@ -76,7 +76,7 @@ describe('appointments MongoDB integration', () => {
   });
 
   it('requires administrator authentication', async () => {
-    const response = await app.inject({ method: 'GET', url: '/api/v1/appointments' });
+    const response = await app.request({ method: 'GET', url: '/api/v1/appointments' });
     expect(response.statusCode).toBe(401);
   });
 
@@ -84,18 +84,18 @@ describe('appointments MongoDB integration', () => {
     const startAt = new Date(Date.now() + 5 * 86_400_000);
     startAt.setUTCHours(10, 0, 0, 0);
     const payload = { patientId, doctorId, startAt: startAt.toISOString(), durationMinutes: 30, reason: 'Integration check' };
-    const create = await app.inject({ method: 'POST', url: '/api/v1/appointments', headers: { cookie }, payload });
+    const create = await app.request({ method: 'POST', url: '/api/v1/appointments', headers: { cookie }, payload });
     expect(create.statusCode).toBe(201);
     const appointment = create.json().data.appointment;
     appointmentIds.push(appointment.id);
     expect(appointment.patient.fullName).toBe('Appointment Patient');
     expect(await Appointment.findById(appointment.id)).not.toBeNull();
 
-    const list = await app.inject({ method: 'GET', url: '/api/v1/appointments?status=scheduled', headers: { cookie } });
+    const list = await app.request({ method: 'GET', url: '/api/v1/appointments?status=scheduled', headers: { cookie } });
     expect(list.statusCode).toBe(200);
     expect(list.json().data.appointments.some((item: { id: string }) => item.id === appointment.id)).toBe(true);
 
-    const conflict = await app.inject({ method: 'POST', url: '/api/v1/appointments', headers: { cookie }, payload });
+    const conflict = await app.request({ method: 'POST', url: '/api/v1/appointments', headers: { cookie }, payload });
     expect(conflict.statusCode).toBe(409);
     expect(conflict.json().error.code).toBe('APPOINTMENT_CONFLICT');
 
@@ -103,8 +103,8 @@ describe('appointments MongoDB integration', () => {
     const concurrentStart = new Date(startAt.getTime() + 2 * 60 * 60_000).toISOString();
     const concurrentPayload = { ...payload, startAt: concurrentStart };
     const simultaneous = await Promise.all([
-      app.inject({ method: 'POST', url: '/api/v1/appointments', headers: { cookie }, payload: concurrentPayload }),
-      app.inject({ method: 'POST', url: '/api/v1/appointments', headers: { cookie }, payload: concurrentPayload }),
+      app.request({ method: 'POST', url: '/api/v1/appointments', headers: { cookie }, payload: concurrentPayload }),
+      app.request({ method: 'POST', url: '/api/v1/appointments', headers: { cookie }, payload: concurrentPayload }),
     ]);
     expect(simultaneous.filter((response) => response.statusCode === 201)).toHaveLength(1);
     expect(simultaneous.filter((response) => response.statusCode === 409)).toHaveLength(1);
@@ -114,38 +114,38 @@ describe('appointments MongoDB integration', () => {
     // Different doctors have independent schedules and may accept the same slot.
     const independentStart = new Date(startAt.getTime() + 4 * 60 * 60_000).toISOString();
     const independent = await Promise.all([
-      app.inject({ method: 'POST', url: '/api/v1/appointments', headers: { cookie }, payload: { ...payload, startAt: independentStart } }),
-      app.inject({ method: 'POST', url: '/api/v1/appointments', headers: { cookie }, payload: { ...payload, doctorId: secondDoctorId, startAt: independentStart } }),
+      app.request({ method: 'POST', url: '/api/v1/appointments', headers: { cookie }, payload: { ...payload, startAt: independentStart } }),
+      app.request({ method: 'POST', url: '/api/v1/appointments', headers: { cookie }, payload: { ...payload, doctorId: secondDoctorId, startAt: independentStart } }),
     ]);
     expect(independent.map((response) => response.statusCode).sort()).toEqual([201, 201]);
     for (const response of independent) appointmentIds.push(response.json().data.appointment.id);
 
     // A reschedule must re-run conflict detection under the same doctor lock.
     const movableStart = new Date(startAt.getTime() + 60 * 60_000).toISOString();
-    const movable = await app.inject({
+    const movable = await app.request({
       method: 'POST', url: '/api/v1/appointments', headers: { cookie },
       payload: { ...payload, startAt: movableStart },
     });
     expect(movable.statusCode).toBe(201);
     const movableId = movable.json().data.appointment.id;
     appointmentIds.push(movableId);
-    const moveIntoConflict = await app.inject({
+    const moveIntoConflict = await app.request({
       method: 'PATCH', url: `/api/v1/appointments/${movableId}`, headers: { cookie },
       payload: { startAt: new Date(startAt.getTime() + 15 * 60_000).toISOString() },
     });
     expect(moveIntoConflict.statusCode).toBe(409);
     expect((await Appointment.findById(movableId).lean())?.startAt.toISOString()).toBe(movableStart);
 
-    const update = await app.inject({ method: 'PATCH', url: `/api/v1/appointments/${appointment.id}`, headers: { cookie }, payload: { status: 'confirmed' } });
+    const update = await app.request({ method: 'PATCH', url: `/api/v1/appointments/${appointment.id}`, headers: { cookie }, payload: { status: 'confirmed' } });
     expect(update.statusCode).toBe(200);
     expect(update.json().data.appointment.status).toBe('confirmed');
 
-    const protectedPatientDelete = await app.inject({ method: 'DELETE', url: `/api/v1/patients/${patientId}`, headers: { cookie } });
+    const protectedPatientDelete = await app.request({ method: 'DELETE', url: `/api/v1/patients/${patientId}`, headers: { cookie } });
     expect(protectedPatientDelete.statusCode).toBe(409);
-    const protectedDoctorDelete = await app.inject({ method: 'DELETE', url: `/api/v1/doctors/${doctorId}`, headers: { cookie } });
+    const protectedDoctorDelete = await app.request({ method: 'DELETE', url: `/api/v1/doctors/${doctorId}`, headers: { cookie } });
     expect(protectedDoctorDelete.statusCode).toBe(409);
 
-    const remove = await app.inject({ method: 'DELETE', url: `/api/v1/appointments/${appointment.id}`, headers: { cookie } });
+    const remove = await app.request({ method: 'DELETE', url: `/api/v1/appointments/${appointment.id}`, headers: { cookie } });
     expect(remove.statusCode).toBe(200);
     expect(await Appointment.findById(appointment.id)).toBeNull();
   });
@@ -155,7 +155,7 @@ describe('appointments MongoDB integration', () => {
     const token = `external-owner-${suffix}`;
     const redis = getRedis();
     await redis.set(key, token, 'PX', 15000, 'NX');
-    const response = await app.inject({
+    const response = await app.request({
       method: 'POST',
       url: '/api/v1/appointments',
       headers: { cookie },
@@ -174,7 +174,7 @@ describe('appointments MongoDB integration', () => {
   it('fails closed when Redis is unavailable', async () => {
     await disconnectRedis();
     const startAt = new Date(Date.now() + 8 * 86_400_000).toISOString();
-    const response = await app.inject({
+    const response = await app.request({
       method: 'POST',
       url: '/api/v1/appointments',
       headers: { cookie },

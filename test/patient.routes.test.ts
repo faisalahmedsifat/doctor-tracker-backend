@@ -1,17 +1,17 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import type { FastifyInstance } from 'fastify';
+import type { TestClient } from './helpers/app.js';
 import { buildApp } from '../src/app.js';
+import { createTestClient } from './helpers/app.js';
 
 describe('patient HTTP boundary', () => {
-  let app: FastifyInstance;
+  let app: TestClient;
 
   beforeAll(async () => {
-    app = await buildApp();
-    await app.ready();
+    app = createTestClient(buildApp());
+   ;
   });
 
   afterAll(async () => {
-    await app.close();
   });
 
   it('requires an authenticated administrator for every patient operation', async () => {
@@ -35,7 +35,7 @@ describe('patient HTTP boundary', () => {
     ];
 
     for (const request of requests) {
-      const response = await app.inject(request);
+      const response = await app.request(request);
       expect(response.statusCode).toBe(401);
       expect(response.json().error.code).toBe('UNAUTHENTICATED');
     }

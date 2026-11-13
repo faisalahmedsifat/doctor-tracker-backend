@@ -1,40 +1,50 @@
-import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
+import type { RequestHandler } from 'express';
+import jwt from 'jsonwebtoken';
 import { AppError } from '../common/errors.js';
+import { env } from '../config/env.js';
+import { ACCESS_COOKIE_NAME } from './security.js';
 import { getActiveAdmin } from '../modules/auth/auth.service.js';
 
-declare module '@fastify/jwt' {
-  interface FastifyJWT {
-    payload: { sub: string; email: string; role: 'admin' };
-    user: { sub: string; email: string; role: 'admin' };
+export interface AuthAdmin {
+  id: string;
+  email: string;
+  role: 'admin';
+}
+
+// Express request augmentation is required for the authenticated principal.
+declare global {
+  // eslint-disable-next-line @typescript-eslint/no-namespace
+  namespace Express {
+    interface Request {
+      authAdmin?: AuthAdmin;
+    }
   }
 }
 
-declare module 'fastify' {
-  interface FastifyInstance {
-    authenticate: (request: FastifyRequest, reply: FastifyReply) => Promise<void>;
-  }
-
-  interface FastifyRequest {
-    authAdmin: { id: string; email: string; role: 'admin' } | null;
-  }
-}
-
-export async function registerAuthentication(app: FastifyInstance): Promise<void> {
-  app.decorateRequest('authAdmin', null);
-  app.decorate('authenticate', async function authenticate(request: FastifyRequest): Promise<void> {
+export const authenticate: RequestHandler = async (request, _response, next) => {
+  try {
+    const signedCookie = request.signedCookies?.[ACCESS_COOKIE_NAME] as string | undefined;
+    if (!signedCookie) throw new AppError(401, 'UNAUTHENTICATED', 'Authentication is required.');
+    let payload: jwt.JwtPayload;
     try {
-      await request.jwtVerify();
+      payload = jwt.verify(signedCookie, env.JWT_ACCESS_SECRET) as jwt.JwtPayload;
     } catch {
       throw new AppError(401, 'UNAUTHENTICATED', 'Authentication is required.');
     }
-
-    const subject = request.user.sub;
-    if (!subject) {
+    if (typeof payload.sub !== 'string' || !payload.sub) {
       throw new AppError(401, 'UNAUTHENTICATED', 'Authentication is required.');
     }
+    request.authAdmin = await getActiveAdmin(payload.sub);
+    next();
+  } catch (error) {
+    next(error);
+  }
+};
 
-    // Database failures are deliberately not converted into 401 responses.
-    // A valid token with an unavailable database is a server/dependency failure.
-    request.authAdmin = await getActiveAdmin(subject);
-  });
-}
+export const requireAdmin: RequestHandler = (request, _response, next) => {
+  if (!request.authAdmin) {
+    next(new AppError(401, 'UNAUTHENTICATED', 'Authentication is required.'));
+    return;
+  }
+  next();
+};

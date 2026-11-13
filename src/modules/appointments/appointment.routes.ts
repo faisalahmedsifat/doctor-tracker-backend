@@ -1,20 +1,28 @@
-import type { FastifyPluginAsyncZod } from 'fastify-type-provider-zod';
-import { z } from 'zod';
+import { Router, type Router as ExpressRouter } from 'express';
+import { AppError } from '../../common/errors.js';
+import { authenticate } from '../../plugins/authentication.js';
 import { createAppointment, deleteAppointment, getAppointment, listAppointments, updateAppointment } from './appointment.service.js';
-import { appointmentIdParamsSchema, appointmentInputSchema, appointmentListQuerySchema, appointmentListResponseSchema, appointmentSingleResponseSchema, appointmentUpdateSchema } from './appointment.schemas.js';
+import { appointmentIdParamsSchema, appointmentInputSchema, appointmentListQuerySchema, appointmentUpdateSchema } from './appointment.schemas.js';
 
-const errorResponse = z.object({ success: z.literal(false), error: z.object({ code: z.string(), message: z.string() }) });
-
-export const appointmentRoutes: FastifyPluginAsyncZod = async (app) => {
-  app.addHook('preHandler', app.authenticate);
-  app.get('/', { schema: { tags: ['Appointments'], summary: 'List appointments', querystring: appointmentListQuerySchema, response: { 200: appointmentListResponseSchema } } },
-    async (request) => ({ success: true as const, data: await listAppointments(request.query) }));
-  app.get('/:id', { schema: { tags: ['Appointments'], summary: 'Get appointment', params: appointmentIdParamsSchema, response: { 200: appointmentSingleResponseSchema, 404: errorResponse } } },
-    async (request) => ({ success: true as const, data: { appointment: await getAppointment(request.params.id) } }));
-  app.post('/', { schema: { tags: ['Appointments'], summary: 'Schedule appointment', body: appointmentInputSchema, response: { 201: appointmentSingleResponseSchema, 400: errorResponse, 409: errorResponse } } },
-    async (request, reply) => reply.code(201).send({ success: true as const, data: { appointment: await createAppointment(request.body) } }));
-  app.patch('/:id', { schema: { tags: ['Appointments'], summary: 'Update appointment', params: appointmentIdParamsSchema, body: appointmentUpdateSchema, response: { 200: appointmentSingleResponseSchema, 400: errorResponse, 404: errorResponse, 409: errorResponse } } },
-    async (request) => ({ success: true as const, data: { appointment: await updateAppointment(request.params.id, request.body) } }));
-  app.delete('/:id', { schema: { tags: ['Appointments'], summary: 'Delete appointment', params: appointmentIdParamsSchema, response: { 200: z.object({ success: z.literal(true) }), 404: errorResponse } } },
-    async (request) => { await deleteAppointment(request.params.id); return { success: true as const }; });
-};
+export const appointmentRoutes: ExpressRouter = Router();
+appointmentRoutes.use(authenticate);
+appointmentRoutes.get('/', async (request, response, next) => {
+  try { response.json({ success: true, data: await listAppointments(appointmentListQuerySchema.parse(request.query)) }); }
+  catch (error) { next(error instanceof Error && 'issues' in error ? new AppError(400, 'VALIDATION_ERROR', error.message) : error); }
+});
+appointmentRoutes.get('/:id', async (request, response, next) => {
+  try { const { id } = appointmentIdParamsSchema.parse(request.params); response.json({ success: true, data: { appointment: await getAppointment(id) } }); }
+  catch (error) { next(error instanceof Error && 'issues' in error ? new AppError(400, 'VALIDATION_ERROR', error.message) : error); }
+});
+appointmentRoutes.post('/', async (request, response, next) => {
+  try { const input = appointmentInputSchema.parse(request.body); response.status(201).json({ success: true, data: { appointment: await createAppointment(input) } }); }
+  catch (error) { next(error instanceof Error && 'issues' in error ? new AppError(400, 'VALIDATION_ERROR', error.message) : error); }
+});
+appointmentRoutes.patch('/:id', async (request, response, next) => {
+  try { const { id } = appointmentIdParamsSchema.parse(request.params); const input = appointmentUpdateSchema.parse(request.body); response.json({ success: true, data: { appointment: await updateAppointment(id, input) } }); }
+  catch (error) { next(error instanceof Error && 'issues' in error ? new AppError(400, 'VALIDATION_ERROR', error.message) : error); }
+});
+appointmentRoutes.delete('/:id', async (request, response, next) => {
+  try { const { id } = appointmentIdParamsSchema.parse(request.params); await deleteAppointment(id); response.json({ success: true }); }
+  catch (error) { next(error instanceof Error && 'issues' in error ? new AppError(400, 'VALIDATION_ERROR', error.message) : error); }
+});
